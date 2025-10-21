@@ -192,6 +192,10 @@ wss.on("connection", (ws) => {
 setInterval(() => {
   fetch("https://astroone-realtime.onrender.com/").catch(() => {});
 }, 30000);
+// Serve the main page when user visits /
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "../client/index_ws.html"));
+});
 
 // =====================================================
 // 🚀 Start Server
