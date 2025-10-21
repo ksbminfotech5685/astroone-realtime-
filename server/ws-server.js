@@ -108,63 +108,57 @@ let openaiReady = false;
 let openaiInstructions = "";
 let openaiVoice = DEFAULT_VOICE;
 
+// keep one persistent OpenAI WS and reuse it
 function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
-  // ensure valid voice
   if (!VALID_VOICES.includes(voice)) voice = DEFAULT_VOICE;
   openaiInstructions = instructions || openaiInstructions;
   openaiVoice = voice || openaiVoice;
 
-  // if ws exists, close then reconnect
-  try { if (openaiWs && openaiWs.readyState === WebSocket.OPEN) openaiWs.terminate(); } catch(e){}
+  // if one already open, just reuse
+  if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
+    if (instructions) {
+      openaiWs.send(JSON.stringify({ type: "input_text", text: openaiInstructions }));
+    }
+    return;
+  }
 
   const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(MODEL_NAME)}&voice=${encodeURIComponent(openaiVoice)}`;
-  console.log("🔌 connecting to OpenAI realtime WS:", url);
+  console.log("🔌 Connecting to OpenAI realtime WS:", url);
 
-  openaiWs = new WebSocket(url, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "realtime=v1" }});
+  openaiWs = new WebSocket(url, {
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "realtime=v1" }
+  });
   openaiWs.binaryType = "arraybuffer";
 
   openaiWs.on("open", () => {
     console.log("✅ Connected to OpenAI Realtime WS");
     openaiReady = true;
-    if (openaiInstructions) {
-      // send initial prompt/instructions as input_text
-      try { openaiWs.send(JSON.stringify({ type: "input_text", text: openaiInstructions })); } catch(e){}
+    if (instructions) {
+      openaiWs.send(JSON.stringify({ type: "input_text", text: instructions }));
     }
   });
 
   openaiWs.on("message", (data) => {
-    // data can be binary audio (ArrayBuffer/Buffer) or text JSON events
-    try {
-      if (typeof data !== "string" && Buffer.isBuffer(data)) {
-        // forward binary frames to browser clients as base64 in type output_audio_binary
-        const base64 = data.toString("base64");
-        broadcastToClients(JSON.stringify({ type: "output_audio_binary", data: base64 }));
-        return;
-      }
-      // else string -> JSON event
-      const j = JSON.parse(data.toString());
-      // forward events to clients (they may include text tokens, response events, output_audio_buffer.append etc)
-      broadcastToClients(JSON.stringify(j));
-    } catch (e) {
-      console.warn("⚠️ openai message parse error:", e?.message);
+    if (typeof data !== "string") {
+      const base64 = Buffer.from(data).toString("base64");
+      broadcastToClients(JSON.stringify({ type: "output_audio_binary", data: base64 }));
+      return;
     }
+    try {
+      const msg = JSON.parse(data);
+      broadcastToClients(JSON.stringify(msg));
+    } catch {}
   });
 
-  openaiWs.on("close", (code, reason) => {
-    let reasonText = "";
-try { reasonText = reason && reason.toString ? reason.toString() : ""; } catch(e) {}
-console.warn("⚠️ OpenAI WS closed:", code, reasonText.slice(0,200));
-
+  openaiWs.on("close", (code) => {
+    console.warn("⚠️ OpenAI WS closed:", code);
     openaiReady = false;
-    // reconnect after short delay
-    setTimeout(() => {
-      try { connectOpenAI(openaiInstructions, openaiVoice); } catch(e){}
-    }, 2000);
+    // reconnect after delay
+    setTimeout(() => connectOpenAI(openaiInstructions, openaiVoice), 3000);
   });
 
   openaiWs.on("error", (err) => {
-    openaiReady = false;
-    console.error("❌ OpenAI WS error:", err?.message || err);
+    console.error("❌ OpenAI WS error:", err.message);
   });
 }
 
