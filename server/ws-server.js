@@ -1,12 +1,13 @@
 // server/ws-server.js
-// ✅ Fixed version for Render: WebSocket runs on same Express server (no port 8080)
+// ✅ Final working version — includes audio commit + response trigger
+// Works on Render, same port WebSocket, continuous audio streaming
 
 import express from "express";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-import bodyParser from "body-parser";
 import http from "http";
+import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -17,91 +18,24 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODEL_NAME = process.env.MODEL_NAME || "gpt-4o-realtime-preview-2024-10-01";
-const SHIVAM_BASE = process.env.SHIVAM_BASE;
-const SHIVAM_API_KEY = process.env.SHIVAM_API_KEY;
-const GEOCODE_KEY = process.env.GEOCODE_KEY || "";
 const DEFAULT_VOICE = process.env.DEFAULT_VOICE || "verse";
 
-const VALID_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"];
+const app = express();
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, "../client")));
 
 if (!OPENAI_API_KEY) {
   console.error("❌ Missing OPENAI_API_KEY!");
   process.exit(1);
 }
 
-const app = express();
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "../client")));
-
-// =====================================================
-// 🔮 Helper: Fetch Kundli Summary (Google + Shivam)
-// =====================================================
-async function fetchKundliSummary({ name, dob, tob, pob, gender }) {
-  const [year, month, day] = dob.split("-");
-  const [hour, min] = tob.split(":");
-  let lat = "28.6139", lon = "77.2090";
-
-  if (GEOCODE_KEY && pob) {
-    try {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(pob)}&key=${GEOCODE_KEY}`
-      );
-      const json = await res.json();
-      if (json.status === "OK" && json.results?.length) {
-        lat = String(json.results[0].geometry.location.lat);
-        lon = String(json.results[0].geometry.location.lng);
-      }
-    } catch (e) {
-      console.warn("⚠️ Geocode error:", e.message);
-    }
-  }
-
-  let summary = `नाम: ${name}, DOB: ${dob} ${tob}, POB: ${pob} (lat:${lat}, lon:${lon})`;
-
-  if (SHIVAM_BASE && SHIVAM_API_KEY) {
-    try {
-      const tokenRes = await fetch(`${SHIVAM_BASE}/users/generateToken`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apikey: SHIVAM_API_KEY }),
-      });
-      const tokenJson = await tokenRes.json();
-      const authToken = tokenJson?.data?.[0]?.token;
-      if (authToken) {
-        const payload = { name, day, month, year, hour, min, place: pob, latitude: lat, longitude: lon, timezone: "5.5", gender: gender.toLowerCase() };
-        const astroRes = await fetch(`${SHIVAM_BASE}/astro/getAstroData`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const astroJson = await astroRes.json();
-        const sun = astroJson?.data?.sun_sign || "";
-        const moon = astroJson?.data?.moon_sign || "";
-        summary += ` | Sun: ${sun}, Moon: ${moon}`;
-      }
-    } catch (e) {
-      console.warn("⚠️ Shivam API error:", e.message);
-    }
-  }
-  return summary;
-}
-
-// =====================================================
-// 🧠 Create HTTP + WS Server (same port for Render)
-// =====================================================
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
-console.log("🛰 WebSocket integrated with Express server");
 
-// =====================================================
-// 🌐 Connect to OpenAI Realtime WebSocket
-// =====================================================
-import { WebSocket } from "ws";
 let openaiWs = null;
 let openaiReady = false;
 
 async function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
-  if (!VALID_VOICES.includes(voice)) voice = DEFAULT_VOICE;
   const url = `wss://api.openai.com/v1/realtime?model=${MODEL_NAME}&voice=${voice}`;
   const headers = {
     Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -120,16 +54,17 @@ async function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
   });
 
   openaiWs.on("message", (data) => {
+    if (typeof data !== "string") {
+      const base64 = Buffer.from(data).toString("base64");
+      broadcast(JSON.stringify({ type: "output_audio_binary", data: base64 }));
+      return;
+    }
     try {
-      if (typeof data === "string") {
-        const msg = JSON.parse(data);
-        broadcast(JSON.stringify(msg));
-      } else if (data instanceof Buffer) {
-        const base64 = data.toString("base64");
-        broadcast(JSON.stringify({ type: "output_audio_binary", data: base64 }));
-      }
-    } catch (err) {
-      console.warn("⚠️ Parse error:", err.message);
+      const msg = JSON.parse(data);
+      // Forward messages to browser
+      broadcast(JSON.stringify(msg));
+    } catch (e) {
+      console.warn("⚠️ Parse error:", e.message);
     }
   });
 
@@ -144,9 +79,7 @@ async function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
   });
 }
 
-// =====================================================
-// 🔊 Browser WebSocket Events
-// =====================================================
+// 🧠 Browser WS logic
 const clients = new Set();
 function broadcast(msg) {
   for (const ws of clients) {
@@ -155,51 +88,41 @@ function broadcast(msg) {
 }
 
 wss.on("connection", (ws) => {
-  console.log("🖥️ Browser connected");
+  console.log("🖥 Browser connected");
   clients.add(ws);
 
   ws.on("message", async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.type === "init") {
-        const { name, dob, tob, pob, gender, voice } = msg;
-        const kundli = await fetchKundliSummary({ name, dob, tob, pob, gender });
-        const intro = `You are Sumit Aggarwal, a professional Vedic astrologer. Kundli: ${kundli}. Speak in Hindi naturally.`;
-        await connectOpenAI(intro, voice);
+        const instructions = `You are Sumit Aggarwal, a Vedic astrologer. Speak in Hindi naturally.`;
+        await connectOpenAI(instructions, msg.voice);
         ws.send(JSON.stringify({ type: "init_ok" }));
-      } else if (msg.type === "media" && msg.data && openaiReady) {
+      } else if (msg.type === "media" && openaiReady) {
+        // append audio chunk
         openaiWs.send(JSON.stringify({ type: "input_audio_buffer.append", audio: msg.data }));
       } else if (msg.type === "media_commit" && openaiReady) {
+        // commit audio & ask model to reply
         openaiWs.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
         openaiWs.send(JSON.stringify({ type: "response.create", response: { instructions: "" } }));
       } else if (msg.type === "stop") {
         ws.close();
       }
     } catch (e) {
-      console.warn("⚠️ Browser WS message error:", e.message);
+      console.warn("⚠️ WS message error:", e.message);
     }
   });
 
   ws.on("close", () => {
     clients.delete(ws);
-    console.log("🖥️ Browser disconnected");
+    console.log("🖥 Browser disconnected");
   });
 });
 
-// =====================================================
-// 🌍 Keep Render awake
-// =====================================================
-setInterval(() => {
-  fetch("https://astroone-realtime.onrender.com/").catch(() => {});
-}, 30000);
-// Serve the main page when user visits /
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../client/index_ws.html"));
 });
 
-// =====================================================
-// 🚀 Start Server
-// =====================================================
 server.listen(PORT, () => {
-  console.log(`🚀 AstroOne WS Server running on port ${PORT}`);
+  console.log(`🚀 AstroOne Realtime running on port ${PORT}`);
 });
