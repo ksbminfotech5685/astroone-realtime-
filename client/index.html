@@ -3,183 +3,174 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>AstroOne Realtime Demo</title>
-  <style>body{font-family:Arial,Helvetica,sans-serif;padding:18px} input,select,button{display:block;margin:8px 0;padding:8px;width:320px}</style>
+  <title>🔮 AstroOne Realtime — Live Astrology Call</title>
+
+  <style>
+    body {
+      font-family: "Poppins", sans-serif;
+      background: linear-gradient(135deg, #6c63ff 0%, #42a5f5 100%);
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      background: #fff;
+      width: 420px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      padding: 30px 28px;
+      text-align: center;
+      transition: all .3s ease;
+    }
+    h1 {
+      color: #4a4a4a;
+      font-size: 22px;
+      margin-bottom: 18px;
+    }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      margin: 8px 0;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      font-size: 15px;
+      outline: none;
+      transition: .2s;
+    }
+    input:focus, select:focus { border-color: #6c63ff; box-shadow: 0 0 0 2px #6c63ff33; }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 16px;
+      cursor: pointer;
+      transition: .2s;
+    }
+    #startBtn {
+      background: #6c63ff;
+      color: #fff;
+    }
+    #startBtn:hover { background: #5a52e0; }
+    #stopBtn {
+      background: #e74c3c;
+      color: #fff;
+      display: none;
+    }
+    #stopBtn:hover { background: #d13f2f; }
+    .status {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #555;
+      min-height: 20px;
+    }
+    .footer {
+      margin-top: 15px;
+      font-size: 12px;
+      color: #888;
+    }
+  </style>
 </head>
 <body>
-  <h2>AstroOne Realtime — Phone-like Conversation</h2>
+  <div class="container">
+    <h1>🔮 AstroOne Live — Talk with Sumit Aggarwal</h1>
 
-  <label>पूरा नाम</label><input id="name" placeholder="Full name">
-  <label>DOB</label><input id="dob" type="date">
-  <label>Time of birth</label><input id="tob" type="time">
-  <label>Place of birth (POB)</label><input id="pob" placeholder="City">
-  <label>Gender</label>
-  <select id="gender"><option value="">Choose</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select>
+    <input id="name" placeholder="पूरा नाम">
+    <input id="dob" type="date">
+    <input id="tob" type="time">
+    <input id="pob" placeholder="जन्म स्थान (शहर)">
+    <select id="gender">
+      <option value="">लिंग चुने</option>
+      <option value="male">पुरुष</option>
+      <option value="female">महिला</option>
+      <option value="other">अन्य</option>
+    </select>
+    <select id="voice">
+      <option value="verse">Voice: Verse (Default)</option>
+      <option value="alloy">Alloy</option>
+      <option value="amber">Amber</option>
+      <option value="copper">Copper</option>
+      <option value="sage">Sage</option>
+      <option value="opal">Opal</option>
+    </select>
 
-  <label>Choose voice</label>
-  <select id="voice">
-    <option value="verse">Verse</option>
-    <option value="alloy">Alloy</option>
-    <option value="amber">Amber</option>
-    <option value="copper">Copper</option>
-    <option value="sage">Sage</option>
-    <option value="opal">Opal</option>
-  </select>
+    <button id="startBtn">▶️ Start Live Call</button>
+    <button id="stopBtn">⏹ End Call</button>
 
-  <button id="startBtn">Start Realtime Call</button>
-  <button id="stopBtn" disabled>Stop</button>
+    <div class="status" id="status">Fill your birth details and press Start.</div>
 
-  <div id="status"></div>
+    <audio id="remoteAudio" autoplay></audio>
 
-  <audio id="remoteAudio" autoplay></audio>
+    <div class="footer">AstroOne Realtime © 2025</div>
+  </div>
 
-<script>
-/*
-Client WebRTC flow:
-1) POST /session with user details -> get sessionJson (contains ephemeral client_secret)
-2) Create RTCPeerConnection locally, add local mic track
-3) Create offer SDP and send to OpenAI Realtime endpoint with Authorization: Bearer <ephemeral_secret>
-   - The exact POST URL and body used below follows the "OpenAI Realtime WebRTC flow": POST to
-     https://api.openai.com/v1/realtime?model=<model> (or /v1/realtime?session=...), using ephemeral token.
-   - If your session JSON contains a direct `session.url` or `session.client_secret`, use those fields
-     — check the server response and adjust the request accordingly (see server logs).
-4) Set remote description with answer returned by OpenAI
-5) Play audio from remote track
-*/
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const remoteAudio = document.getElementById('remoteAudio');
+    const statusEl = document.getElementById('status');
+    let pc, localStream, ephemeralKey, sessionMeta;
 
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const remoteAudio = document.getElementById('remoteAudio');
-const status = document.getElementById('status');
+    function setStatus(msg){ statusEl.innerText = msg; }
 
-let pc = null;
-let localStream = null;
-let ephemeralKey = null;
-let sessionMeta = null;
+    async function startCall() {
+      const name = document.getElementById('name').value.trim();
+      const dob = document.getElementById('dob').value;
+      const tob = document.getElementById('tob').value;
+      const pob = document.getElementById('pob').value.trim();
+      const gender = document.getElementById('gender').value;
+      const voice = document.getElementById('voice').value || 'verse';
+      if(!name||!dob||!tob||!pob||!gender){ return setStatus("⚠️ कृपया सभी विवरण भरें।"); }
 
-function log(s){ status.innerText = s; console.log(s); }
+      setStatus("🔮 Connecting with AstroOne Realtime...");
+      startBtn.disabled = true;
 
-async function startRealtime() {
-  const name = document.getElementById('name').value.trim();
-  const dob = document.getElementById('dob').value;
-  const tob = document.getElementById('tob').value;
-  const pob = document.getElementById('pob').value.trim();
-  const gender = document.getElementById('gender').value;
-  const voice = document.getElementById('voice').value || 'verse';
+      const resp = await fetch('/session', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name,dob,tob,pob,gender,voice })
+      });
+      const data = await resp.json();
+      if(!data?.session){ setStatus("❌ Session creation failed."); console.log(data); return; }
+      sessionMeta = data.session;
+      ephemeralKey = sessionMeta?.client_secret?.value || sessionMeta?.client_secret;
+      if(!ephemeralKey){ setStatus("❌ Invalid session key."); console.log(sessionMeta); return; }
 
-  if(!name||!dob||!tob||!pob||!gender){ alert('Fill all fields'); return; }
+      localStream = await navigator.mediaDevices.getUserMedia({ audio:true, video:false });
+      pc = new RTCPeerConnection();
+      pc.ontrack = e => { remoteAudio.srcObject = e.streams[0]; remoteAudio.play().catch(()=>{}); };
+      for(const t of localStream.getTracks()) pc.addTrack(t, localStream);
 
-  log('Requesting ephemeral session from server...');
-  const resp = await fetch('/session', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ name, dob, tob, pob, gender, voice })
-  });
-  const sessionResp = await resp.json();
-  if(!sessionResp?.session){ log('Session creation failed: ' + JSON.stringify(sessionResp)); return; }
-  sessionMeta = sessionResp.session;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-  // sessionMeta should contain client_secret.value (ephemeral token) — inspect keys:
-  // console.log(sessionMeta);
-  // NOTE: adapt the field path if your OpenAI response uses different naming.
-  ephemeralKey = sessionMeta?.client_secret?.value || sessionMeta?.client_secret?.token || sessionMeta?.client_secret;
-  if(!ephemeralKey){
-    log('Ephemeral key not found in session response. Inspect session object in console.');
-    console.log(sessionMeta);
-    return;
-  }
-
-  log('Got ephemeral key. Setting up local media and RTCPeerConnection...');
-
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-
-  pc = new RTCPeerConnection();
-
-  // attach remote audio
-  pc.ontrack = (ev) => {
-    try {
-      remoteAudio.srcObject = ev.streams[0];
-      remoteAudio.play().catch(()=>{});
-    } catch(e){ console.warn(e); }
-  };
-
-  // add local tracks to peer connection
-  for(const t of localStream.getTracks()) pc.addTrack(t, localStream);
-
-  log('Creating SDP offer...');
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  // ---------- Send SDP offer to OpenAI Realtime endpoint -------------
-  // The typical endpoint pattern is: POST https://api.openai.com/v1/realtime?model=<modelName>
-  // Use ephemeralKey in Authorization header.
-  // Body: { "sdp": offer.sdp } or { "offer": "<sdp>" } depending on API variant.
-  // Below we send { "offer": offer.sdp } as a best-effort. If OpenAI expects different
-  // shape, check server console or OpenAI docs and change accordingly.
-
-  const modelName = sessionMeta?.model || sessionMeta?.model_name || "gpt-4o-realtime-preview";
-  const realtimeUrl = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(modelName)}`;
-
-  log('Sending offer to OpenAI Realtime endpoint...');
-  const answerResp = await fetch(realtimeUrl, {
-    method:'POST',
-    headers:{
-      'Authorization': `Bearer ${ephemeralKey}`,
-      'Content-Type': 'application/sdp' // sometimes they expect sdp raw; other times JSON.
-      // If Content-Type 'application/sdp' doesn't work, change to 'application/json' and body { "offer": offer.sdp }
-    },
-    // Body variation: try raw SDP first (some Realtime endpoints accept application/sdp)
-    body: offer.sdp
-  });
-
-  if (!answerResp.ok) {
-    // Try fallback JSON form
-    log('Realtime POST returned error, trying JSON fallback...');
-    const fallback = await fetch(realtimeUrl, {
-      method:'POST',
-      headers:{
-        'Authorization': `Bearer ${ephemeralKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ offer: offer.sdp })
-    });
-    if (!fallback.ok) {
-      const txt = await fallback.text().catch(()=>null);
-      log('Realtime offer failed: ' + fallback.status + ' ' + txt);
-      console.error('sessionMeta', sessionMeta);
-      return;
-    } else {
-      const answerText = await fallback.text();
-      await pc.setRemoteDescription({ type:'answer', sdp: answerText });
-      log('Connected (fallback).');
+      const modelName = sessionMeta?.model || "gpt-4o-realtime-preview";
+      const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(modelName)}`;
+      const res = await fetch(url, {
+        method:'POST',
+        headers:{'Authorization':`Bearer ${ephemeralKey}`,'Content-Type':'application/sdp'},
+        body: offer.sdp
+      });
+      const answer = await res.text();
+      await pc.setRemoteDescription({type:'answer', sdp:answer});
+      setStatus("✅ Live call connected! You can start speaking.");
+      stopBtn.style.display="block";
     }
-  } else {
-    // if success and returns raw SDP:
-    const answerSDP = await answerResp.text();
-    await pc.setRemoteDescription({ type:'answer', sdp: answerSDP });
-    log('Connected to OpenAI Realtime (SDP answer applied).');
-  }
 
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-}
+    function stopCall(){
+      if(localStream) localStream.getTracks().forEach(t=>t.stop());
+      if(pc) pc.close();
+      startBtn.disabled=false; stopBtn.style.display="none";
+      setStatus("📴 Call ended.");
+    }
 
-function stopRealtime(){
-  if(localStream) {
-    for(const t of localStream.getTracks()) t.stop();
-    localStream = null;
-  }
-  if(pc) {
-    try { pc.close(); } catch {}
-    pc = null;
-  }
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  log('Stopped.');
-}
-
-startBtn.onclick = startRealtime;
-stopBtn.onclick = stopRealtime;
-</script>
+    startBtn.onclick=startCall;
+    stopBtn.onclick=stopCall;
+  </script>
 </body>
 </html>
-
