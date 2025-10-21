@@ -118,19 +118,26 @@ function floatToBase64(float32Array){
   return btoa(binary);
 }
 
-// Play base64-encoded audio (expected audio codec that OpenAI sends)
-function playBase64Audio(b64){
+// Play raw 16-bit PCM base64 frames
+function playBase64Audio(b64) {
   try {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    audioCtx.decodeAudioData(bytes.buffer, (buffer) => {
-      const src = audioCtx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(audioCtx.destination);
-      src.start();
-    }, (err)=>{ console.warn("decodeAudioData", err); });
+    const len = bytes.length / 2;
+    const float32 = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      const val = (bytes[i * 2 + 1] << 8) | bytes[i * 2];
+      const s = val > 32767 ? val - 65536 : val;
+      float32[i] = s / 32768;
+    }
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buffer = audioCtx.createBuffer(1, len, 44100);
+    buffer.getChannelData(0).set(float32);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+    src.start();
   } catch (e) {
-    console.warn("playBase64Audio error", e);
+    console.warn("PCM play error", e);
   }
 }
 
