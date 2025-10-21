@@ -1,103 +1,3 @@
-<!doctype html>
-<html lang="hi">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>🔮 AstroOne Realtime — Live Astrology Call</title>
-
-<style>
-  body {
-    font-family: "Poppins", sans-serif;
-    background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    margin: 0;
-  }
-  .card {
-    background: #fff;
-    width: 420px;
-    border-radius: 18px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    padding: 25px 30px;
-    text-align: center;
-    animation: fadeIn .6s ease;
-  }
-  @keyframes fadeIn {
-    from {opacity: 0; transform: translateY(20px);}
-    to {opacity: 1; transform: translateY(0);}
-  }
-  input, select {
-    width: 100%;
-    padding: 12px;
-    margin: 8px 0;
-    border-radius: 10px;
-    border: 1px solid #ddd;
-    font-size: 15px;
-    outline: none;
-    transition: .2s;
-  }
-  input:focus, select:focus {
-    border-color: #6a11cb;
-    box-shadow: 0 0 0 2px #6a11cb33;
-  }
-  button {
-    width: 100%;
-    padding: 14px;
-    margin-top: 10px;
-    border: none;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 16px;
-    cursor: pointer;
-    transition: .2s;
-  }
-  #connect { background: #6a11cb; color: #fff; }
-  #connect:hover { background: #5a0fba; }
-  #disconnect { background: #e74c3c; color: #fff; display: none; }
-  #disconnect:hover { background: #c0392b; }
-  #status { margin-top: 12px; font-size: 14px; color: #333; min-height: 20px; }
-  .footer { margin-top: 14px; font-size: 12px; color: #888; }
-</style>
-</head>
-
-<body>
-  <div class="card">
-    <h2>🔮 AstroOne Live — Talk with Sumit Aggarwal</h2>
-
-    <input id="name" placeholder="पूरा नाम">
-    <input id="dob" type="date">
-    <input id="tob" type="time">
-    <input id="pob" placeholder="जन्म स्थान (शहर)">
-    <select id="gender">
-      <option value="">लिंग चुने</option>
-      <option value="male">पुरुष</option>
-      <option value="female">महिला</option>
-      <option value="other">अन्य</option>
-    </select>
-
-    <select id="voice">
-      <option value="verse">Verse</option>
-      <option value="alloy">Alloy</option>
-      <option value="ash">Ash</option>
-      <option value="ballad">Ballad</option>
-      <option value="coral">Coral</option>
-      <option value="echo">Echo</option>
-      <option value="sage">Sage</option>
-      <option value="shimmer">Shimmer</option>
-      <option value="marin">Marin</option>
-      <option value="cedar">Cedar</option>
-    </select>
-
-    <button id="connect">▶️ Start Live Call</button>
-    <button id="disconnect">⏹ End Call</button>
-
-    <div id="status">अपनी जन्म जानकारी भरें और Start दबाएँ।</div>
-    <audio id="audioPlayer" autoplay playsinline></audio>
-    <div class="footer">AstroOne Realtime © 2025</div>
-  </div>
-
 <script>
 let ws = null;
 let mediaStream = null;
@@ -105,16 +5,11 @@ let audioCtx = null;
 let processor = null;
 let sourceNode = null;
 let isStreaming = false;
-
 const statusEl = document.getElementById('status');
 const audioPlayer = document.getElementById('audioPlayer');
 
-function setStatus(msg){
-  statusEl.innerText = msg;
-  console.log(msg);
-}
+function setStatus(msg){ statusEl.innerText = msg; console.log(msg); }
 
-// 🎙 Convert Float32 -> 16-bit PCM -> Base64
 function floatToBase64(float32Array){
   const len = float32Array.length;
   const buffer = new ArrayBuffer(len * 2);
@@ -132,7 +27,6 @@ function floatToBase64(float32Array){
   return btoa(binary);
 }
 
-// 🔊 Play Base64 audio
 function playBase64Audio(b64){
   const audioData = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   audioCtx = audioCtx || new AudioContext();
@@ -144,7 +38,6 @@ function playBase64Audio(b64){
   });
 }
 
-// 🚀 Start Call
 async function startCall(){
   const name=document.getElementById('name').value.trim();
   const dob=document.getElementById('dob').value;
@@ -152,87 +45,56 @@ async function startCall(){
   const pob=document.getElementById('pob').value.trim();
   const gender=document.getElementById('gender').value;
   const voice=document.getElementById('voice').value;
+  if(!name||!dob||!tob||!pob||!gender){ setStatus("⚠️ कृपया सभी विवरण भरें।"); return; }
 
-  if(!name||!dob||!tob||!pob||!gender){
-    setStatus("⚠️ कृपया सभी विवरण भरें।");
-    return;
-  }
-
-  // Connect WebSocket to server
   const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
   ws = new WebSocket(wsURL);
-  setStatus("🛰 AstroOne Realtime से कनेक्ट हो रहा है...");
+  setStatus("🛰 Connecting...");
 
-  ws.onopen = async () => {
-    setStatus("🔮 Connected! Initializing mic...");
-
-    // Send initialization first
+  ws.onopen = async ()=>{
     ws.send(JSON.stringify({ type:'init', name, dob, tob, pob, gender, voice }));
+    setStatus("🎙 Initializing mic...");
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    audioCtx = new AudioContext();
+    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+    processor = audioCtx.createScriptProcessor(4096,1,1);
+    sourceNode.connect(processor);
+    processor.connect(audioCtx.destination);
 
-    // Wait a second for OpenAI session to be ready
-    setTimeout(async () => {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioCtx = new AudioContext();
-      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
-      processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      sourceNode.connect(processor);
-      processor.connect(audioCtx.destination);
-
-      processor.onaudioprocess = (e) => {
-        if(ws && ws.readyState === WebSocket.OPEN){
-          const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
-          ws.send(JSON.stringify({ type:'media', data:base64 }));
-        }
-      };
-
-      // Send commit every few seconds to get AI responses
-      setInterval(() => {
-        if(ws && ws.readyState === WebSocket.OPEN){
-          ws.send(JSON.stringify({ type:'media_commit' }));
-        }
-      }, 4000);
-
-      isStreaming = true;
-      document.getElementById('connect').style.display='none';
-      document.getElementById('disconnect').style.display='block';
-      setStatus("🎙 Live call started — बोलिए...");
-    }, 1200);
-  };
-
-  ws.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if(msg?.type==='output_audio_buffer.append' && msg?.audio){
-        playBase64Audio(msg.audio);
-      } else if(msg?.type==='output_audio_binary' && msg?.data){
-        playBase64Audio(msg.data);
-      } else if(msg?.type==='init_ok'){
-        console.log("Init OK");
+    processor.onaudioprocess = (e)=>{
+      if(ws && ws.readyState === WebSocket.OPEN){
+        const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
+        ws.send(JSON.stringify({ type:'media', data: base64 }));
       }
-    } catch(err){
-      console.warn("Parse error:", err);
-    }
+    };
+
+    // Automatically commit every few seconds
+    setInterval(()=>{
+      if(ws && ws.readyState===WebSocket.OPEN)
+        ws.send(JSON.stringify({ type:'media_commit' }));
+    }, 4000);
+
+    document.getElementById('connect').style.display='none';
+    document.getElementById('disconnect').style.display='block';
+    setStatus("✅ Connected! Speak now...");
   };
 
-  ws.onclose = () => {
-    setStatus("📴 Call ended.");
-    stopCall();
+  ws.onmessage = (e)=>{
+    try{
+      const msg = JSON.parse(e.data);
+      if(msg?.type==='output_audio_binary' && msg?.data) playBase64Audio(msg.data);
+    }catch{}
   };
 
-  ws.onerror = (err) => {
-    console.error("WS error:", err);
-    setStatus("❌ Connection error.");
-    stopCall();
-  };
+  ws.onerror = ()=>setStatus("❌ Connection error.");
+  ws.onclose = ()=>stopCall();
 }
 
-// 🛑 Stop Call
 function stopCall(){
   if(processor){ processor.disconnect(); processor=null; }
   if(sourceNode){ sourceNode.disconnect(); sourceNode=null; }
   if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
   if(ws){ try{ ws.send(JSON.stringify({type:'stop'})); ws.close(); }catch{} ws=null; }
-  isStreaming=false;
   document.getElementById('connect').style.display='block';
   document.getElementById('disconnect').style.display='none';
   setStatus("📴 Call stopped.");
@@ -241,5 +103,3 @@ function stopCall(){
 document.getElementById('connect').onclick=startCall;
 document.getElementById('disconnect').onclick=stopCall;
 </script>
-</body>
-</html>
