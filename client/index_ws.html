@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>🔮 AstroOne Live — Sumit Agarwal</title>
+<title>🔮 AstroOne Live — Sumit Aggarwal</title>
 <style>
   :root{--accent:#6a11cb;--accent-dark:#5a0fba}
   body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb 0%,#2575fc 100%);font-family:Inter,system-ui,Arial;color:#222}
@@ -12,18 +12,16 @@
   label{font-size:13px;color:#444;margin-top:8px;display:block}
   input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
   .row{display:flex;gap:10px}
-  .small{width:50%}
   #connect{background:var(--accent);color:#fff;border:none;cursor:pointer}
   #connect:hover{background:var(--accent-dark)}
   #disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
   #status{margin-top:12px;color:#333;min-height:20px}
-  .center{display:flex;gap:8px;align-items:center}
   .muted{color:#888;font-size:12px;margin-top:8px}
 </style>
 </head>
 <body>
   <div class="card">
-    <h1>🔮 AstroOne Live — Talk with Sumit Agarwal</h1>
+    <h1>🔮 AstroOne Live — Talk with Sumit Aggarwal</h1>
 
     <label>पूरा नाम</label>
     <input id="name" placeholder="पूरा नाम">
@@ -45,7 +43,12 @@
     <div class="row">
       <div style="flex:1">
         <label>Gender</label>
-        <select id="gender"><option value="">Select</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select>
+        <select id="gender">
+          <option value="">Select</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+          <option value="other">Other</option>
+        </select>
       </div>
       <div style="flex:1">
         <label>Voice</label>
@@ -64,38 +67,26 @@
       </div>
     </div>
 
-    <div style="margin-top:12px" class="center">
+    <div style="margin-top:12px;display:flex;gap:8px">
       <button id="connect">▶️ Start Live Call</button>
       <button id="disconnect">⏹ Stop</button>
     </div>
 
     <div id="status">Fill details and press Start.</div>
     <div class="muted">Note: allow microphone permissions in your browser.</div>
-
-    <audio id="audioPlayer" autoplay playsinline></audio>
   </div>
 
 <script>
-/*
-client/index_ws.html
-- Connects to server WS at /ws (same origin)
-- Sends init (kundli data)
-- Streams mic audio as base64 PCM16 via {type:'media', data: base64}
-- Periodically sends {type:'media_commit'} to trigger OpenAI response
-- Plays returned binary audio frames (base64) from server (type 'output_audio_binary')
-*/
-
-const connectBtn = document.getElementById("connect");
-const disconnectBtn = document.getElementById("disconnect");
-const statusEl = document.getElementById("status");
-const audioPlayer = document.getElementById("audioPlayer");
-
 let ws = null;
 let audioCtx = null;
 let sourceNode = null;
 let processor = null;
 let mediaStream = null;
 let commitInterval = null;
+
+const connectBtn = document.getElementById("connect");
+const disconnectBtn = document.getElementById("disconnect");
+const statusEl = document.getElementById("status");
 
 function setStatus(t){ statusEl.innerText = t; console.log(t); }
 
@@ -108,7 +99,6 @@ function floatToBase64(float32Array){
     let s = Math.max(-1, Math.min(1, float32Array[i]));
     view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
   }
-  // binary -> base64
   let binary = "";
   const bytes = new Uint8Array(buffer);
   const CHUNK = 0x8000;
@@ -118,7 +108,7 @@ function floatToBase64(float32Array){
   return btoa(binary);
 }
 
-// Play raw 16-bit PCM base64 frames
+// ✅ Fixed PCM playback: play raw 16-bit PCM frames
 function playBase64Audio(b64) {
   try {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -141,7 +131,7 @@ function playBase64Audio(b64) {
   }
 }
 
-// Start the call
+// Start call function
 async function startCall(){
   const name = document.getElementById("name").value.trim();
   const dob = document.getElementById("dob").value;
@@ -155,20 +145,16 @@ async function startCall(){
     return;
   }
 
-  // Open WebSocket (same origin, path /ws)
   const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
   ws = new WebSocket(wsUrl);
   setStatus("🛰 Connecting to server...");
 
   ws.onopen = async () => {
     setStatus("🔮 Connected. Sending init...");
-    // Send init => server will create/prepare OpenAI session (includes kundli instructions)
     ws.send(JSON.stringify({ type: "init", name, dob, tob, pob, gender, voice }));
 
-    // small wait to allow server to establish/prepare OpenAI WS
     await new Promise(r => setTimeout(r, 900));
 
-    // get mic
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
@@ -190,7 +176,7 @@ async function startCall(){
       ws.send(JSON.stringify({ type: "media", data: b64 }));
     };
 
-    // immediate commit after 1s, then periodic commits every 2.5s
+    // Commit initial after 1s, then every 2.5s
     setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" })); }, 1000);
     commitInterval = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" }));
@@ -204,18 +190,15 @@ async function startCall(){
   ws.onmessage = (evt) => {
     try {
       const msg = JSON.parse(evt.data);
-      // server forwards binary frames as output_audio_binary with base64 payload
       if (msg?.type === "output_audio_binary" && msg?.data) {
         playBase64Audio(msg.data);
       } else if (msg?.type === "output_audio_buffer.append" && msg?.audio) {
-        // some event shapes include .audio
         playBase64Audio(msg.audio);
       } else {
-        // debug / text tokens or other events
-        console.debug("svr>", msg);
+        console.debug("Server:", msg);
       }
     } catch (e) {
-      console.warn("ws message parse error", e);
+      console.warn("Message parse error", e);
     }
   };
 
@@ -243,7 +226,7 @@ function stopCall(){
   disconnectBtn.style.display = "none";
 }
 
-// Attach
+// Attach handlers
 connectBtn.addEventListener("click", startCall);
 disconnectBtn.addEventListener("click", stopCall);
 </script>
