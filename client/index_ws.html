@@ -157,7 +157,7 @@ async function startCall(){
     // commit every 4 seconds to get model response
     commitTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" }));
-    }, 4000);
+    }, 2000);
 
     connectBtn.style.display = "none";
     disconnectBtn.style.display = "block";
