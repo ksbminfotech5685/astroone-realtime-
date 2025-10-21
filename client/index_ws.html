@@ -3,101 +3,214 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>AstroOne Realtime (WS bridge)</title>
+<title>AstroOne Realtime (WebSocket Bridge)</title>
+
 <style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#f4f7fb;padding:24px}
-  .card{max-width:680px;margin:0 auto;background:#fff;padding:20px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
-  input,select,button{display:block;width:100%;padding:10px;margin:8px 0;border-radius:8px;border:1px solid #ddd}
-  #status{min-height:20px;color:#333;margin-top:8px}
+  body {
+    font-family: "Poppins", sans-serif;
+    background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .card {
+    background: #fff;
+    width: 420px;
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    padding: 25px 30px;
+    text-align: center;
+    animation: fadeIn .6s ease;
+  }
+  @keyframes fadeIn {
+    from {opacity: 0; transform: translateY(20px);}
+    to {opacity: 1; transform: translateY(0);}
+  }
+  input, select {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0;
+    border-radius: 10px;
+    border: 1px solid #ddd;
+    font-size: 15px;
+    outline: none;
+    transition: .2s;
+  }
+  input:focus, select:focus {
+    border-color: #6a11cb;
+    box-shadow: 0 0 0 2px #6a11cb33;
+  }
+  button {
+    width: 100%;
+    padding: 14px;
+    margin-top: 10px;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+    transition: .2s;
+  }
+  #connect { background: #6a11cb; color: #fff; }
+  #connect:hover { background: #5a0fba; }
+  #disconnect { background: #e74c3c; color: #fff; display: none; }
+  #disconnect:hover { background: #c0392b; }
+  #status { margin-top: 12px; font-size: 14px; color: #333; min-height: 20px; }
+  .footer { margin-top: 14px; font-size: 12px; color: #888; }
 </style>
 </head>
+
 <body>
-<div class="card">
-  <h2>AstroOne Realtime — WebSocket Bridge</h2>
-  <input id="name" placeholder="पूरा नाम">
-  <input id="dob" type="date">
-  <input id="tob" type="time">
-  <input id="pob" placeholder="जन्म स्थान (city)">
-  <select id="gender"><option value="">लिंग चुने</option><option value="male">Male</option><option value="female">Female</option></select>
-  <select id="voice"><option value="verse">Verse</option><option value="alloy">Alloy</option></select>
-  <button id="connect">Start Live Call</button>
-  <button id="disconnect" disabled>End Call</button>
-  <div id="status">Status: idle</div>
-</div>
+  <div class="card">
+    <h2>🔮 AstroOne Live (WebSocket Realtime)</h2>
+
+    <input id="name" placeholder="पूरा नाम">
+    <input id="dob" type="date">
+    <input id="tob" type="time">
+    <input id="pob" placeholder="जन्म स्थान (शहर)">
+    <select id="gender">
+      <option value="">लिंग चुने</option>
+      <option value="male">पुरुष</option>
+      <option value="female">महिला</option>
+      <option value="other">अन्य</option>
+    </select>
+
+    <select id="voice">
+      <option value="verse">Verse</option>
+      <option value="alloy">Alloy</option>
+      <option value="ash">Ash</option>
+      <option value="ballad">Ballad</option>
+      <option value="coral">Coral</option>
+      <option value="echo">Echo</option>
+      <option value="sage">Sage</option>
+      <option value="shimmer">Shimmer</option>
+      <option value="marin">Marin</option>
+      <option value="cedar">Cedar</option>
+    </select>
+
+    <button id="connect">▶️ Start Live Call</button>
+    <button id="disconnect">⏹ End Call</button>
+
+    <div id="status">Fill your details and click Start.</div>
+    <audio id="audioPlayer" autoplay playsinline></audio>
+    <div class="footer">AstroOne Realtime © 2025</div>
+  </div>
 
 <script>
-/*
-Client-side WebSocket protocol (to our server at ws://<host>:8080)
-- connect
-- send {"type":"init", name,dob,tob,pob,gender,voice}
-- start capturing microphone, encode PCM16 base64 chunks and send {"type":"media","data":"<base64>"}
-- when you want model to respond, send {"type":"media_commit"}
-- play audio received from server messages (base64 in event output_audio_buffer.append or output_audio_binary)
-*/
-
 let ws = null;
 let mediaStream = null;
+let audioCtx = null;
 let processor = null;
 let sourceNode = null;
-let audioCtx = null;
-let isConnected = false;
+let isStreaming = false;
 const statusEl = document.getElementById('status');
+const audioPlayer = document.getElementById('audioPlayer');
 
-function setStatus(t){ statusEl.innerText = 'Status: ' + t; console.log(t); }
+function setStatus(msg){
+  statusEl.innerText = msg;
+  console.log(msg);
+}
 
-function base64EncodeBuffer(buf) {
-  // buf: ArrayBuffer or Uint8Array
+// Encode Float32Array → 16-bit PCM → base64
+function floatToBase64(float32Array){
+  const len = float32Array.length;
+  const buffer = new ArrayBuffer(len * 2);
+  const view = new DataView(buffer);
+  for(let i=0;i<len;i++){
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(i*2, s<0 ? s*0x8000 : s*0x7FFF, true);
+  }
   let binary = '';
-  const bytes = new Uint8Array(buf);
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i,i+chunk));
   }
   return btoa(binary);
 }
 
-// Convert float32 samples into 16-bit PCM (little endian)
-function floatTo16BitPCM(float32Array) {
-  const l = float32Array.length;
-  const buffer = new ArrayBuffer(l * 2);
-  const view = new DataView(buffer);
-  let offset = 0;
-  for (let i = 0; i < l; i++, offset += 2) {
-    let s = Math.max(-1, Math.min(1, float32Array[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-  }
-  return buffer;
+// Decode base64 → play audio chunk
+function playBase64Audio(b64){
+  const audioData = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  audioCtx = audioCtx || new AudioContext();
+  audioCtx.decodeAudioData(audioData.buffer, buffer => {
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+    src.start();
+  });
 }
 
-async function startStreaming() {
-  const name = document.getElementById('name').value.trim();
-  const dob = document.getElementById('dob').value;
-  const tob = document.getElementById('tob').value;
-  const pob = document.getElementById('pob').value.trim();
-  const gender = document.getElementById('gender').value;
-  const voice = document.getElementById('voice').value || 'verse';
-  if(!name||!dob||!tob||!pob||!gender){ setStatus('Fill all fields'); return; }
+async function startCall(){
+  const name=document.getElementById('name').value.trim();
+  const dob=document.getElementById('dob').value;
+  const tob=document.getElementById('tob').value;
+  const pob=document.getElementById('pob').value.trim();
+  const gender=document.getElementById('gender').value;
+  const voice=document.getElementById('voice').value;
+  if(!name||!dob||!tob||!pob||!gender){ setStatus("⚠️ सभी विवरण भरें।"); return; }
 
-  // connect to server WS (server listens on port 8080)
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8080');
-  ws.onopen = () => {
-    setStatus('Connected to server WS. Sending init.');
-    ws.send(JSON.stringify({ type: 'init', name, dob, tob, pob, gender, voice }));
-    // after init, start mic capture
-    startMicCapture();
-    isConnected = true;
-    document.getElementById('connect').disabled = true;
-    document.getElementById('disconnect').disabled = false;
-    setStatus('Streaming mic... speak to begin. Press "End Call" to stop.');
+  // Connect to your Render WebSocket server (port 8080 is proxied internally)
+  const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8080';
+  ws = new WebSocket(wsURL);
+  setStatus("🛰 Connecting to AstroOne Realtime...");
+
+  ws.onopen = async ()=>{
+    setStatus("🔮 Connected! Initializing mic...");
+    ws.send(JSON.stringify({ type:'init', name, dob, tob, pob, gender, voice }));
+    // Start microphone capture
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new AudioContext();
+    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    sourceNode.connect(processor);
+    processor.connect(audioCtx.destination);
+    processor.onaudioprocess = (e)=>{
+      if(ws && ws.readyState===WebSocket.OPEN){
+        const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
+        ws.send(JSON.stringify({ type:'media', data:base64 }));
+      }
+    };
+    isStreaming = true;
+    document.getElementById('connect').style.display='none';
+    document.getElementById('disconnect').style.display='block';
+    setStatus("🎙 Live call started — speak freely...");
   };
 
-  ws.onmessage = (evt) => {
-    // server forwards OpenAI messages — can be JSON events or base64 audio
-    try {
-      const data = JSON.parse(evt.data);
-      // If OpenAI forwards structured JSON events (like output_audio_buffer.append with audio base64)
-      if (data?.type === 'output_audio_buffer.append' && data?.audio) {
-        playBase64Audio(data.audio);
-      } else if (data?.type === 'output_audio_binary' && data?.data) {
-        playBase64Audio(data.data);
-      } else if (
+  ws.onmessage = (e)=>{
+    try{
+      const msg = JSON.parse(e.data);
+      if(msg?.type==='output_audio_buffer.append' && msg?.audio){
+        playBase64Audio(msg.audio);
+      }else if(msg?.type==='output_audio_binary' && msg?.data){
+        playBase64Audio(msg.data);
+      }else if(msg?.type==='init_ok'){
+        console.log("Init OK from server");
+      }else{
+        console.log("Server:", msg);
+      }
+    }catch(err){ console.warn("Parse error:", err); }
+  };
+
+  ws.onclose = ()=>{ setStatus("📴 Call ended."); stopCall(); };
+  ws.onerror = (err)=>{ console.error("WS error:", err); setStatus("❌ Connection error."); stopCall(); };
+}
+
+function stopCall(){
+  if(processor){ processor.disconnect(); processor=null; }
+  if(sourceNode){ sourceNode.disconnect(); sourceNode=null; }
+  if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
+  if(ws){ try{ ws.send(JSON.stringify({type:'stop'})); ws.close(); }catch{} ws=null; }
+  isStreaming=false;
+  document.getElementById('connect').style.display='block';
+  document.getElementById('disconnect').style.display='none';
+  setStatus("📴 Call stopped.");
+}
+
+document.getElementById('connect').onclick=startCall;
+document.getElementById('disconnect').onclick=stopCall;
+</script>
+</body>
+</html>
