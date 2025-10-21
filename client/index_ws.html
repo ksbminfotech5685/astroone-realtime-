@@ -1,131 +1,273 @@
 <!doctype html>
 <html lang="hi">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>🔮 AstroOne Live — Sumit Aggarwal</title>
 <style>
-body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb,#2575fc);font-family:Poppins,Arial;color:#222}
-.card{width:460px;background:#fff;border-radius:16px;padding:22px;box-shadow:0 14px 35px rgba(0,0,0,0.18)}
-h1{text-align:center;margin:0 0 10px;font-size:20px}
-label{font-size:13px;color:#444;margin-top:8px;display:block}
-input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
-#connect{background:#6a11cb;color:#fff;border:none;cursor:pointer}
-#connect:hover{background:#5812b7}
-#disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
-#status{margin-top:12px;text-align:center;color:#333;min-height:20px}
+  :root{--accent:#6a11cb;--accent-dark:#4a0fa8}
+  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb,#2575fc);font-family:Inter,system-ui,Arial;color:#222}
+  .card{width:480px;background:#fff;border-radius:14px;padding:22px;box-shadow:0 14px 40px rgba(0,0,0,0.15)}
+  h1{margin:0 0 10px;text-align:center;font-size:20px}
+  label{font-size:13px;color:#444;margin-top:8px;display:block}
+  input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
+  .row{display:flex;gap:10px}
+  #connect{background:var(--accent);color:#fff;border:none;cursor:pointer}
+  #connect:hover{background:var(--accent-dark)}
+  #disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
+  #status{margin-top:12px;color:#333;min-height:20px;text-align:center}
+  .muted{font-size:12px;color:#888;text-align:center;margin-top:8px}
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>🔮 AstroOne Live — Talk with Sumit Aggarwal</h1>
-  <label>पूरा नाम</label><input id="name">
-  <label>DOB</label><input id="dob" type="date">
-  <label>Time</label><input id="tob" type="time">
-  <label>Place of Birth (POB)</label><input id="pob">
-  <label>Gender</label>
-  <select id="gender"><option value="">Select</option><option value="male">Male</option><option value="female">Female</option></select>
-  <label>Voice</label>
-  <select id="voice">
-    <option value="verse">Verse</option>
-    <option value="alloy">Alloy</option>
-    <option value="ash">Ash</option>
-    <option value="ballad">Ballad</option>
-    <option value="coral">Coral</option>
-    <option value="echo">Echo</option>
-    <option value="sage">Sage</option>
-    <option value="shimmer">Shimmer</option>
-    <option value="marin">Marin</option>
-    <option value="cedar">Cedar</option>
-  </select>
-  <button id="connect">▶️ Start Live Call</button>
-  <button id="disconnect">⏹ Stop</button>
-  <div id="status">Fill details and press Start.</div>
-</div>
+  <div class="card">
+    <h1>🔮 AstroOne Live — Talk with Sumit Aggarwal</h1>
+
+    <label>पूरा नाम</label>
+    <input id="name" placeholder="पूरा नाम">
+
+    <div class="row">
+      <div style="flex:1">
+        <label>DOB</label>
+        <input id="dob" type="date">
+      </div>
+      <div style="flex:1">
+        <label>Time</label>
+        <input id="tob" type="time">
+      </div>
+    </div>
+
+    <label>Place of Birth (POB)</label>
+    <input id="pob" placeholder="शहर, राज्य या देश">
+
+    <div class="row">
+      <div style="flex:1">
+        <label>Gender</label>
+        <select id="gender"><option value="">Select</option><option value="male">Male</option><option value="female">Female</option></select>
+      </div>
+      <div style="flex:1">
+        <label>Voice</label>
+        <select id="voice">
+          <option value="verse">Verse</option>
+          <option value="alloy">Alloy</option>
+          <option value="ash">Ash</option>
+          <option value="ballad">Ballad</option>
+          <option value="coral">Coral</option>
+          <option value="echo">Echo</option>
+          <option value="sage">Sage</option>
+          <option value="shimmer">Shimmer</option>
+          <option value="marin">Marin</option>
+          <option value="cedar">Cedar</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button id="connect">▶️ Start Live Call</button>
+      <button id="disconnect">⏹ Stop</button>
+    </div>
+
+    <div id="status">Fill details and press Start.</div>
+    <div class="muted">Note: Allow microphone permissions in your browser.</div>
+  </div>
 
 <script>
-let ws=null,audioCtx=null,src=null,proc=null,stream=null,timer=null;
-function setStatus(t){document.getElementById("status").innerText=t;console.log(t);}
-function floatToBase64(f32){
-  const len=f32.length,b=new ArrayBuffer(len*2),v=new DataView(b);
-  for(let i=0;i<len;i++){let s=Math.max(-1,Math.min(1,f32[i]));v.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true);}
-  let bin="",bytes=new Uint8Array(b),chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}
-  return btoa(bin);
+/*
+  client/index_ws.html
+  - Streams mic PCM->base64 to server
+  - Sends periodic commits to trigger OpenAI response
+  - Receives base64 raw PCM frames from server and plays them
+  - Automatically resamples source PCM (assumed 16000 Hz) to audio output sample rate
+*/
+
+const connectBtn = document.getElementById("connect");
+const disconnectBtn = document.getElementById("disconnect");
+const statusEl = document.getElementById("status");
+
+let ws = null;
+let audioCtx = null;
+let micStream = null;
+let mediaSource = null;
+let scriptNode = null;
+let commitTimer = null;
+
+// Helper: set status
+function setStatus(text) { statusEl.innerText = text; console.log(text); }
+
+// Convert Float32Array -> 16-bit PCM LE -> base64
+function floatToBase64(float32Array) {
+  const len = float32Array.length;
+  const buffer = new ArrayBuffer(len * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < len; i++) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  // Convert to binary string in chunks and base64
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
-// ---- proper 16kHz PCM playback ----
-function playBase64Audio(b64){
-  try{
-    const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-    const len=bytes.length/2;
-    const f32=new Float32Array(len);
-    for(let i=0;i<len;i++){
-      const val=(bytes[i*2+1]<<8)|bytes[i*2];
-      const s=val>32767?val-65536:val;
-      f32[i]=s/32768;
+// Play base64 raw PCM (assumed sampleRate = 16000 by default).
+// If browser output sampleRate != sourceRate, resample using OfflineAudioContext.
+async function playPCMBase64(b64, sourceSampleRate = 16000) {
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const frameCount = bytes.length / 2;
+    const float32 = new Float32Array(frameCount);
+    for (let i = 0; i < frameCount; i++) {
+      const lo = bytes[i * 2];
+      const hi = bytes[i * 2 + 1];
+      const val = (hi << 8) | lo;
+      const signed = val > 32767 ? val - 65536 : val;
+      float32[i] = signed / 32768;
     }
-    if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
-    const buffer=audioCtx.createBuffer(1,len,16000);
-    buffer.getChannelData(0).set(f32);
-    const srcNode=audioCtx.createBufferSource();
-    srcNode.buffer=buffer;srcNode.connect(audioCtx.destination);srcNode.start();
-  }catch(e){console.warn("PCM play error",e);}
+
+    // Create AudioBuffer with sourceSampleRate
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const outputSampleRate = audioCtx.sampleRate || 48000;
+
+    // If same sample rate, play directly
+    if (Math.abs(outputSampleRate - sourceSampleRate) < 1) {
+      const buffer = audioCtx.createBuffer(1, frameCount, sourceSampleRate);
+      buffer.getChannelData(0).set(float32);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(audioCtx.destination);
+      src.start();
+      return;
+    }
+
+    // Resample using OfflineAudioContext
+    const offlineCtx = new OfflineAudioContext(1, Math.ceil(frameCount * outputSampleRate / sourceSampleRate), outputSampleRate);
+    const buf = offlineCtx.createBuffer(1, frameCount, sourceSampleRate);
+    buf.getChannelData(0).set(float32);
+    const srcNode = offlineCtx.createBufferSource();
+    srcNode.buffer = buf;
+    srcNode.connect(offlineCtx.destination);
+    srcNode.start(0);
+    const rendered = await offlineCtx.startRendering();
+    // Play the rendered buffer in main audioCtx
+    const playSrc = audioCtx.createBufferSource();
+    playSrc.buffer = rendered;
+    playSrc.connect(audioCtx.destination);
+    playSrc.start();
+  } catch (e) {
+    console.warn("playPCMBase64 error", e);
+  }
 }
 
-async function startCall(){
-  const name=document.getElementById("name").value.trim(),
-        dob=document.getElementById("dob").value,
-        tob=document.getElementById("tob").value,
-        pob=document.getElementById("pob").value.trim(),
-        gender=document.getElementById("gender").value,
-        voice=document.getElementById("voice").value;
-  if(!name||!dob||!tob||!pob||!gender){setStatus("⚠️ सभी विवरण भरें।");return;}
+// Start call: open WS, start mic capture, stream chunks
+async function startCall() {
+  const name = document.getElementById("name").value.trim();
+  const dob = document.getElementById("dob").value;
+  const tob = document.getElementById("tob").value;
+  const pob = document.getElementById("pob").value.trim();
+  const gender = document.getElementById("gender").value;
+  const voice = document.getElementById("voice").value || "verse";
 
-  const url=(location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws";
-  ws=new WebSocket(url);
+  if (!name || !dob || !tob || !pob || !gender) {
+    setStatus("⚠️ कृपया सभी विवरण भरें।");
+    return;
+  }
+
+  const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+  ws = new WebSocket(wsUrl);
   setStatus("🛰 Connecting...");
-  ws.onopen=async()=>{
-    ws.send(JSON.stringify({type:"init",name,dob,tob,pob,gender,voice}));
-    await new Promise(r=>setTimeout(r,800));
-    try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}
-    catch(e){setStatus("🔇 Mic denied");return;}
-    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    src=audioCtx.createMediaStreamSource(stream);
-    proc=audioCtx.createScriptProcessor(4096,1,1);
-    src.connect(proc);proc.connect(audioCtx.destination);
-    proc.onaudioprocess=e=>{
-      if(!ws||ws.readyState!==1)return;
-      const b64=floatToBase64(e.inputBuffer.getChannelData(0));
-      ws.send(JSON.stringify({type:"media",data:b64}));
+
+  ws.onopen = async () => {
+    setStatus("🔮 Connected. Sending init...");
+    ws.send(JSON.stringify({ type: "init", name, dob, tob, pob, gender, voice }));
+
+    // small delay to let server create/open OpenAI WS
+    await new Promise(r => setTimeout(r, 800));
+
+    // start mic
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setStatus("🔇 Microphone permission denied.");
+      console.error(e);
+      return;
+    }
+
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    mediaSource = audioCtx.createMediaStreamSource(micStream);
+
+    // ScriptProcessor is deprecated but widely supported — fine for now
+    scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    mediaSource.connect(scriptNode);
+    scriptNode.connect(audioCtx.destination);
+
+    scriptNode.onaudioprocess = (e) => {
+      try {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const float32 = e.inputBuffer.getChannelData(0);
+        const b64 = floatToBase64(float32);
+        ws.send(JSON.stringify({ type: "media", data: b64 }));
+      } catch (err) {
+        console.warn("onaudioprocess error", err);
+      }
     };
-    setTimeout(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},1000);
-    timer=setInterval(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},2500);
-    document.getElementById("connect").style.display="none";
-    document.getElementById("disconnect").style.display="block";
+
+    // Commit after a short delay, then periodic commits (2.5s)
+    setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" })); }, 1000);
+    commitTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" }));
+    }, 2500);
+
+    connectBtn.style.display = "none";
+    disconnectBtn.style.display = "inline-block";
     setStatus("🎙 Live — बोलिए...");
   };
-  ws.onmessage=e=>{
-    try{const m=JSON.parse(e.data);
-      if(m?.type==="output_audio_binary"&&m?.data)playBase64Audio(m.data);
-    }catch{}
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg?.type === "output_audio_binary" && msg?.data) {
+        // We assume source PCM sample rate is 16000 (OpenAI realtime often uses 16k)
+        // Resampling code will handle mismatch to audioCtx.sampleRate.
+        playPCMBase64(msg.data, 16000);
+      } else {
+        console.debug("server-msg", msg);
+      }
+    } catch (e) {
+      console.warn("ws message parse error", e);
+    }
   };
-  ws.onerror=err=>{console.log("WS error",err);stopCall();};
-  ws.onclose=()=>{setStatus("📴 Call ended.");stopCall();};
+
+  ws.onerror = (err) => {
+    console.error("WebSocket error:", err);
+    setStatus("❌ Connection error.");
+    stopCall();
+  };
+
+  ws.onclose = () => {
+    setStatus("📴 Call ended.");
+    stopCall();
+  };
 }
 
-function stopCall(){
-  if(timer){clearInterval(timer);timer=null;}
-  if(proc){try{proc.disconnect();}catch{}proc=null;}
-  if(src){try{src.disconnect();}catch{}src=null;}
-  if(stream){try{stream.getTracks().forEach(t=>t.stop());}catch{}stream=null;}
-  if(ws){try{ws.send(JSON.stringify({type:"stop"}));ws.close();}catch{}ws=null;}
-  document.getElementById("connect").style.display="block";
-  document.getElementById("disconnect").style.display="none";
+// Stop call and cleanup
+function stopCall() {
+  if (commitTimer) { clearInterval(commitTimer); commitTimer = null; }
+  try { if (scriptNode) { scriptNode.disconnect(); scriptNode = null; } } catch {}
+  try { if (mediaSource) { mediaSource.disconnect(); mediaSource = null; } } catch {}
+  try { if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; } } catch {}
+  try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "stop" })); } catch {}
+  try { if (ws) ws.close(); } catch {}
+  ws = null;
+  connectBtn.style.display = "inline-block";
+  disconnectBtn.style.display = "none";
 }
 
-document.getElementById("connect").onclick=startCall;
-document.getElementById("disconnect").onclick=stopCall;
+connectBtn.addEventListener("click", startCall);
+disconnectBtn.addEventListener("click", stopCall);
 </script>
 </body>
 </html>
