@@ -143,6 +143,46 @@ function playBase64Audio(b64){
   });
 }
 
+<script>
+let ws = null;
+let mediaStream = null;
+let audioCtx = null;
+let processor = null;
+let sourceNode = null;
+let isStreaming = false;
+const statusEl = document.getElementById('status');
+const audioPlayer = document.getElementById('audioPlayer');
+
+function setStatus(msg){ statusEl.innerText = msg; console.log(msg); }
+
+function floatToBase64(float32Array){
+  const len = float32Array.length;
+  const buffer = new ArrayBuffer(len * 2);
+  const view = new DataView(buffer);
+  for(let i=0;i<len;i++){
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(i*2, s<0 ? s*0x8000 : s*0x7FFF, true);
+  }
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i,i+chunk));
+  }
+  return btoa(binary);
+}
+
+function playBase64Audio(b64){
+  const audioData = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  audioCtx = audioCtx || new AudioContext();
+  audioCtx.decodeAudioData(audioData.buffer, buffer => {
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+    src.start();
+  });
+}
+
 async function startCall(){
   const name=document.getElementById('name').value.trim();
   const dob=document.getElementById('dob').value;
@@ -151,6 +191,75 @@ async function startCall(){
   const gender=document.getElementById('gender').value;
   const voice=document.getElementById('voice').value;
   if(!name||!dob||!tob||!pob||!gender){ setStatus("⚠️ सभी विवरण भरें।"); return; }
+
+  // connect to server WebSocket (same host/port)
+  const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  ws = new WebSocket(wsURL);
+  setStatus("🛰 Connecting to AstroOne Realtime...");
+
+  ws.onopen = async ()=>{
+    setStatus("🔮 Connected! Initializing mic...");
+    // send init after open
+    ws.send(JSON.stringify({ type:'init', name, dob, tob, pob, gender, voice }));
+
+    // only now start mic
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new AudioContext();
+    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    sourceNode.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    processor.onaudioprocess = (e)=>{
+      if(ws && ws.readyState === WebSocket.OPEN){
+        const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
+        ws.send(JSON.stringify({ type:'media', data:base64 }));
+      }
+    };
+
+    // Send first "commit" after a short delay to trigger response
+    setTimeout(()=>{
+      if(ws && ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type:'media_commit' }));
+    }, 3000);
+
+    isStreaming = true;
+    document.getElementById('connect').style.display='none';
+    document.getElementById('disconnect').style.display='block';
+    setStatus("🎙 Live call started — speak freely...");
+  };
+
+  ws.onmessage = (e)=>{
+    try{
+      const msg = JSON.parse(e.data);
+      if(msg?.type==='output_audio_buffer.append' && msg?.audio){
+        playBase64Audio(msg.audio);
+      }else if(msg?.type==='output_audio_binary' && msg?.data){
+        playBase64Audio(msg.data);
+      }else if(msg?.type==='init_ok'){
+        console.log("Init OK");
+      }
+    }catch(err){ console.warn("Parse error:", err); }
+  };
+
+  ws.onclose = ()=>{ setStatus("📴 Call ended."); stopCall(); };
+  ws.onerror = (err)=>{ console.error("WS error:", err); setStatus("❌ Connection error."); stopCall(); };
+}
+
+function stopCall(){
+  if(processor){ processor.disconnect(); processor=null; }
+  if(sourceNode){ sourceNode.disconnect(); sourceNode=null; }
+  if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
+  if(ws){ try{ ws.send(JSON.stringify({type:'stop'})); ws.close(); }catch{} ws=null; }
+  isStreaming=false;
+  document.getElementById('connect').style.display='block';
+  document.getElementById('disconnect').style.display='none';
+  setStatus("📴 Call stopped.");
+}
+
+document.getElementById('connect').onclick=startCall;
+document.getElementById('disconnect').onclick=stopCall;
+</script>
 
   // Connect to your Render WebSocket server (port 8080 is proxied internally)
   const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
