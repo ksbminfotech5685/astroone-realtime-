@@ -163,8 +163,8 @@ async function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
 // =====================================================
 // 🧠 Local WS Server for Browser Clients
 // =====================================================
-const wss = new WebSocketServer({ port: 8080 });
-console.log("🛰 Browser WebSocket server on ws://0.0.0.0:8080");
+const wss = new WebSocketServer({ port: 3000 });
+console.log("🛰 Browser WebSocket server on ws://0.0.0.0:3000");
 
 const clients = new Set();
 function broadcast(msg) {
