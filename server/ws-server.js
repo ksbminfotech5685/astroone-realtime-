@@ -103,11 +103,6 @@ async function fetchKundliSummary({ name, dob, tob, pob, gender }) {
 // ===================================================================
 // OpenAI WS management (single persistent connection). Reconnect logic.
 // ===================================================================
-let openaiWs = null;
-let openaiReady = false;
-let openaiInstructions = "";
-let openaiVoice = DEFAULT_VOICE;
-
 // keep one persistent OpenAI WS and reuse it
 function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
   if (!VALID_VOICES.includes(voice)) voice = DEFAULT_VOICE;
