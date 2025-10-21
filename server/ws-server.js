@@ -151,7 +151,10 @@ function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
   });
 
   openaiWs.on("close", (code, reason) => {
-    console.warn("⚠️ OpenAI WS closed:", code, reason?.toString?.slice(0,200));
+    let reasonText = "";
+try { reasonText = reason && reason.toString ? reason.toString() : ""; } catch(e) {}
+console.warn("⚠️ OpenAI WS closed:", code, reasonText.slice(0,200));
+
     openaiReady = false;
     // reconnect after short delay
     setTimeout(() => {
@@ -244,9 +247,16 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-// Keep-alive ping to prevent free-tier sleeping; adjust to your domain
+// Keep-alive ping (safe for Render)
 setInterval(() => {
-  try { fetch(process.env.KEEP_ALIVE_URL || `https://${process.env.RENDER_EXTERNAL_URL || process.env.HOSTNAME || "localhost"}`); } catch (e) {}
+  try {
+    const base = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || "";
+    if (base.startsWith("http")) {
+      fetch(base).catch(() => {});
+    } else if (base) {
+      fetch(`https://${base}`).catch(() => {});
+    }
+  } catch (e) {}
 }, 30000);
 
 // start server
