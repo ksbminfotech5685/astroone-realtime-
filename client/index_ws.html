@@ -1,29 +1,28 @@
 <!doctype html>
 <html lang="hi">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>🔮 AstroOne Live — Talk with Sumit Aggarwal</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🔮 AstroOne Live — Sumit Aggarwal</title>
 <style>
-  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb,#2575fc);font-family:Poppins,Arial;color:#222}
-  .card{width:460px;background:#fff;border-radius:16px;padding:22px;box-shadow:0 14px 35px rgba(0,0,0,0.18)}
-  h1{margin:0 0 10px;font-size:20px;text-align:center}
-  label{font-size:13px;color:#444;margin-top:8px;display:block}
-  input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
-  #connect{background:#6a11cb;color:#fff;border:none;cursor:pointer}
-  #connect:hover{background:#5812b7}
-  #disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
-  #status{margin-top:12px;color:#333;min-height:20px;text-align:center}
+body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb,#2575fc);font-family:Poppins,Arial;color:#222}
+.card{width:460px;background:#fff;border-radius:16px;padding:22px;box-shadow:0 14px 35px rgba(0,0,0,0.18)}
+h1{text-align:center;margin:0 0 10px;font-size:20px}
+label{font-size:13px;color:#444;margin-top:8px;display:block}
+input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
+#connect{background:#6a11cb;color:#fff;border:none;cursor:pointer}
+#connect:hover{background:#5812b7}
+#disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
+#status{margin-top:12px;text-align:center;color:#333;min-height:20px}
 </style>
 </head>
 <body>
 <div class="card">
   <h1>🔮 AstroOne Live — Talk with Sumit Aggarwal</h1>
-  <label>पूरा नाम</label>
-  <input id="name" placeholder="पूरा नाम">
+  <label>पूरा नाम</label><input id="name">
   <label>DOB</label><input id="dob" type="date">
   <label>Time</label><input id="tob" type="time">
-  <label>Place of Birth (POB)</label><input id="pob" placeholder="शहर, राज्य या देश">
+  <label>Place of Birth (POB)</label><input id="pob">
   <label>Gender</label>
   <select id="gender"><option value="">Select</option><option value="male">Male</option><option value="female">Female</option></select>
   <label>Voice</label>
@@ -45,69 +44,69 @@
 </div>
 
 <script>
-let ws=null, audioCtx=null, src=null, processor=null, mediaStream=null, timer=null;
+let ws=null,audioCtx=null,src=null,proc=null,stream=null,timer=null;
 function setStatus(t){document.getElementById("status").innerText=t;console.log(t);}
-
-function floatToBase64(float32Array){
-  const len=float32Array.length,buf=new ArrayBuffer(len*2),view=new DataView(buf);
-  for(let i=0;i<len;i++){let s=Math.max(-1,Math.min(1,float32Array[i]));view.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true);}
-  let binary="",bytes=new Uint8Array(buf),chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk){binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}
-  return btoa(binary);
+function floatToBase64(f32){
+  const len=f32.length,b=new ArrayBuffer(len*2),v=new DataView(b);
+  for(let i=0;i<len;i++){let s=Math.max(-1,Math.min(1,f32[i]));v.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true);}
+  let bin="",bytes=new Uint8Array(b),chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}
+  return btoa(bin);
 }
 
-// ✅ PCM playback
+// ---- proper 16kHz PCM playback ----
 function playBase64Audio(b64){
   try{
     const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
     const len=bytes.length/2;
-    const float32=new Float32Array(len);
+    const f32=new Float32Array(len);
     for(let i=0;i<len;i++){
       const val=(bytes[i*2+1]<<8)|bytes[i*2];
       const s=val>32767?val-65536:val;
-      float32[i]=s/32768;
+      f32[i]=s/32768;
     }
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    const buffer=audioCtx.createBuffer(1,len,44100);
-    buffer.getChannelData(0).set(float32);
+    if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+    const buffer=audioCtx.createBuffer(1,len,16000);
+    buffer.getChannelData(0).set(f32);
     const srcNode=audioCtx.createBufferSource();
-    srcNode.buffer=buffer;
-    srcNode.connect(audioCtx.destination);
-    srcNode.start();
+    srcNode.buffer=buffer;srcNode.connect(audioCtx.destination);srcNode.start();
   }catch(e){console.warn("PCM play error",e);}
 }
 
 async function startCall(){
-  const name=document.getElementById("name").value.trim(),dob=document.getElementById("dob").value,
-        tob=document.getElementById("tob").value,pob=document.getElementById("pob").value.trim(),
-        gender=document.getElementById("gender").value,voice=document.getElementById("voice").value;
+  const name=document.getElementById("name").value.trim(),
+        dob=document.getElementById("dob").value,
+        tob=document.getElementById("tob").value,
+        pob=document.getElementById("pob").value.trim(),
+        gender=document.getElementById("gender").value,
+        voice=document.getElementById("voice").value;
   if(!name||!dob||!tob||!pob||!gender){setStatus("⚠️ सभी विवरण भरें।");return;}
 
-  const wsUrl=(location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws";
-  ws=new WebSocket(wsUrl);setStatus("🛰 Connecting...");
+  const url=(location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws";
+  ws=new WebSocket(url);
+  setStatus("🛰 Connecting...");
   ws.onopen=async()=>{
     ws.send(JSON.stringify({type:"init",name,dob,tob,pob,gender,voice}));
     await new Promise(r=>setTimeout(r,800));
-    try{mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});}
-    catch(e){setStatus("🔇 Mic permission denied.");return;}
+    try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}
+    catch(e){setStatus("🔇 Mic denied");return;}
     audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    src=audioCtx.createMediaStreamSource(mediaStream);
-    processor=audioCtx.createScriptProcessor(4096,1,1);
-    src.connect(processor);processor.connect(audioCtx.destination);
-    processor.onaudioprocess=e=>{
+    src=audioCtx.createMediaStreamSource(stream);
+    proc=audioCtx.createScriptProcessor(4096,1,1);
+    src.connect(proc);proc.connect(audioCtx.destination);
+    proc.onaudioprocess=e=>{
       if(!ws||ws.readyState!==1)return;
       const b64=floatToBase64(e.inputBuffer.getChannelData(0));
       ws.send(JSON.stringify({type:"media",data:b64}));
     };
-    setTimeout(()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},1000);
-    timer=setInterval(()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},2500);
+    setTimeout(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},1000);
+    timer=setInterval(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},2500);
     document.getElementById("connect").style.display="none";
     document.getElementById("disconnect").style.display="block";
     setStatus("🎙 Live — बोलिए...");
   };
   ws.onmessage=e=>{
-    try{
-      const m=JSON.parse(e.data);
+    try{const m=JSON.parse(e.data);
       if(m?.type==="output_audio_binary"&&m?.data)playBase64Audio(m.data);
     }catch{}
   };
@@ -117,9 +116,9 @@ async function startCall(){
 
 function stopCall(){
   if(timer){clearInterval(timer);timer=null;}
-  if(processor){try{processor.disconnect();}catch{}processor=null;}
+  if(proc){try{proc.disconnect();}catch{}proc=null;}
   if(src){try{src.disconnect();}catch{}src=null;}
-  if(mediaStream){try{mediaStream.getTracks().forEach(t=>t.stop());}catch{}mediaStream=null;}
+  if(stream){try{stream.getTracks().forEach(t=>t.stop());}catch{}stream=null;}
   if(ws){try{ws.send(JSON.stringify({type:"stop"}));ws.close();}catch{}ws=null;}
   document.getElementById("connect").style.display="block";
   document.getElementById("disconnect").style.display="none";
