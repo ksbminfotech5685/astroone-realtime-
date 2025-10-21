@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AstroOne Realtime (WS bridge)</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#f4f7fb;padding:24px}
+  .card{max-width:680px;margin:0 auto;background:#fff;padding:20px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+  input,select,button{display:block;width:100%;padding:10px;margin:8px 0;border-radius:8px;border:1px solid #ddd}
+  #status{min-height:20px;color:#333;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>AstroOne Realtime — WebSocket Bridge</h2>
+  <input id="name" placeholder="पूरा नाम">
+  <input id="dob" type="date">
+  <input id="tob" type="time">
+  <input id="pob" placeholder="जन्म स्थान (city)">
+  <select id="gender"><option value="">लिंग चुने</option><option value="male">Male</option><option value="female">Female</option></select>
+  <select id="voice"><option value="verse">Verse</option><option value="alloy">Alloy</option></select>
+  <button id="connect">Start Live Call</button>
+  <button id="disconnect" disabled>End Call</button>
+  <div id="status">Status: idle</div>
+</div>
+
+<script>
+/*
+Client-side WebSocket protocol (to our server at ws://<host>:8080)
+- connect
+- send {"type":"init", name,dob,tob,pob,gender,voice}
+- start capturing microphone, encode PCM16 base64 chunks and send {"type":"media","data":"<base64>"}
+- when you want model to respond, send {"type":"media_commit"}
+- play audio received from server messages (base64 in event output_audio_buffer.append or output_audio_binary)
+*/
+
+let ws = null;
+let mediaStream = null;
+let processor = null;
+let sourceNode = null;
+let audioCtx = null;
+let isConnected = false;
+const statusEl = document.getElementById('status');
+
+function setStatus(t){ statusEl.innerText = 'Status: ' + t; console.log(t); }
+
+function base64EncodeBuffer(buf) {
+  // buf: ArrayBuffer or Uint8Array
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+// Convert float32 samples into 16-bit PCM (little endian)
+function floatTo16BitPCM(float32Array) {
+  const l = float32Array.length;
+  const buffer = new ArrayBuffer(l * 2);
+  const view = new DataView(buffer);
+  let offset = 0;
+  for (let i = 0; i < l; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return buffer;
+}
+
+async function startStreaming() {
+  const name = document.getElementById('name').value.trim();
+  const dob = document.getElementById('dob').value;
+  const tob = document.getElementById('tob').value;
+  const pob = document.getElementById('pob').value.trim();
+  const gender = document.getElementById('gender').value;
+  const voice = document.getElementById('voice').value || 'verse';
+  if(!name||!dob||!tob||!pob||!gender){ setStatus('Fill all fields'); return; }
+
+  // connect to server WS (server listens on port 8080)
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8080');
+  ws.onopen = () => {
+    setStatus('Connected to server WS. Sending init.');
+    ws.send(JSON.stringify({ type: 'init', name, dob, tob, pob, gender, voice }));
+    // after init, start mic capture
+    startMicCapture();
+    isConnected = true;
+    document.getElementById('connect').disabled = true;
+    document.getElementById('disconnect').disabled = false;
+    setStatus('Streaming mic... speak to begin. Press "End Call" to stop.');
+  };
+
+  ws.onmessage = (evt) => {
+    // server forwards OpenAI messages — can be JSON events or base64 audio
+    try {
+      const data = JSON.parse(evt.data);
+      // If OpenAI forwards structured JSON events (like output_audio_buffer.append with audio base64)
+      if (data?.type === 'output_audio_buffer.append' && data?.audio) {
+        playBase64Audio(data.audio);
+      } else if (data?.type === 'output_audio_binary' && data?.data) {
+        playBase64Audio(data.data);
+      } else if (
