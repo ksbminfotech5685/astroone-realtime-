@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>AstroOne Realtime (WebSocket Bridge)</title>
+<title>🔮 AstroOne Realtime — Live Astrology Call</title>
 
 <style>
   body {
@@ -64,7 +64,7 @@
 
 <body>
   <div class="card">
-    <h2>🔮 AstroOne Live (WebSocket Realtime)</h2>
+    <h2>🔮 AstroOne Live — Talk with Sumit Aggarwal</h2>
 
     <input id="name" placeholder="पूरा नाम">
     <input id="dob" type="date">
@@ -93,7 +93,7 @@
     <button id="connect">▶️ Start Live Call</button>
     <button id="disconnect">⏹ End Call</button>
 
-    <div id="status">Fill your details and click Start.</div>
+    <div id="status">अपनी जन्म जानकारी भरें और Start दबाएँ।</div>
     <audio id="audioPlayer" autoplay playsinline></audio>
     <div class="footer">AstroOne Realtime © 2025</div>
   </div>
@@ -105,6 +105,7 @@ let audioCtx = null;
 let processor = null;
 let sourceNode = null;
 let isStreaming = false;
+
 const statusEl = document.getElementById('status');
 const audioPlayer = document.getElementById('audioPlayer');
 
@@ -113,7 +114,7 @@ function setStatus(msg){
   console.log(msg);
 }
 
-// Encode Float32Array → 16-bit PCM → base64
+// 🎙 Convert Float32 -> 16-bit PCM -> Base64
 function floatToBase64(float32Array){
   const len = float32Array.length;
   const buffer = new ArrayBuffer(len * 2);
@@ -131,7 +132,7 @@ function floatToBase64(float32Array){
   return btoa(binary);
 }
 
-// Decode base64 → play audio chunk
+// 🔊 Play Base64 audio
 function playBase64Audio(b64){
   const audioData = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   audioCtx = audioCtx || new AudioContext();
@@ -143,46 +144,7 @@ function playBase64Audio(b64){
   });
 }
 
-<script>
-let ws = null;
-let mediaStream = null;
-let audioCtx = null;
-let processor = null;
-let sourceNode = null;
-let isStreaming = false;
-const statusEl = document.getElementById('status');
-const audioPlayer = document.getElementById('audioPlayer');
-
-function setStatus(msg){ statusEl.innerText = msg; console.log(msg); }
-
-function floatToBase64(float32Array){
-  const len = float32Array.length;
-  const buffer = new ArrayBuffer(len * 2);
-  const view = new DataView(buffer);
-  for(let i=0;i<len;i++){
-    let s = Math.max(-1, Math.min(1, float32Array[i]));
-    view.setInt16(i*2, s<0 ? s*0x8000 : s*0x7FFF, true);
-  }
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  const chunk = 0x8000;
-  for(let i=0;i<bytes.length;i+=chunk){
-    binary += String.fromCharCode.apply(null, bytes.subarray(i,i+chunk));
-  }
-  return btoa(binary);
-}
-
-function playBase64Audio(b64){
-  const audioData = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  audioCtx = audioCtx || new AudioContext();
-  audioCtx.decodeAudioData(audioData.buffer, buffer => {
-    const src = audioCtx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(audioCtx.destination);
-    src.start();
-  });
-}
-
+// 🚀 Start Call
 async function startCall(){
   const name=document.getElementById('name').value.trim();
   const dob=document.getElementById('dob').value;
@@ -190,123 +152,81 @@ async function startCall(){
   const pob=document.getElementById('pob').value.trim();
   const gender=document.getElementById('gender').value;
   const voice=document.getElementById('voice').value;
-  if(!name||!dob||!tob||!pob||!gender){ setStatus("⚠️ सभी विवरण भरें।"); return; }
 
-  // connect to server WebSocket (same host/port)
+  if(!name||!dob||!tob||!pob||!gender){
+    setStatus("⚠️ कृपया सभी विवरण भरें।");
+    return;
+  }
+
+  // Connect WebSocket to server
   const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
   ws = new WebSocket(wsURL);
-  setStatus("🛰 Connecting to AstroOne Realtime...");
+  setStatus("🛰 AstroOne Realtime से कनेक्ट हो रहा है...");
 
-  ws.onopen = async ()=>{
+  ws.onopen = async () => {
     setStatus("🔮 Connected! Initializing mic...");
-    // send init after open
+
+    // Send initialization first
     ws.send(JSON.stringify({ type:'init', name, dob, tob, pob, gender, voice }));
 
-    // only now start mic
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioCtx = new AudioContext();
-    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
-    processor = audioCtx.createScriptProcessor(4096, 1, 1);
-    sourceNode.connect(processor);
-    processor.connect(audioCtx.destination);
+    // Wait a second for OpenAI session to be ready
+    setTimeout(async () => {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioCtx = new AudioContext();
+      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      sourceNode.connect(processor);
+      processor.connect(audioCtx.destination);
 
-    processor.onaudioprocess = (e)=>{
-      if(ws && ws.readyState === WebSocket.OPEN){
-        const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
-        ws.send(JSON.stringify({ type:'media', data:base64 }));
-      }
-    };
+      processor.onaudioprocess = (e) => {
+        if(ws && ws.readyState === WebSocket.OPEN){
+          const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
+          ws.send(JSON.stringify({ type:'media', data:base64 }));
+        }
+      };
 
-    // Send first "commit" after a short delay to trigger response
-    setTimeout(()=>{
-      if(ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type:'media_commit' }));
-    }, 3000);
+      // Send commit every few seconds to get AI responses
+      setInterval(() => {
+        if(ws && ws.readyState === WebSocket.OPEN){
+          ws.send(JSON.stringify({ type:'media_commit' }));
+        }
+      }, 4000);
 
-    isStreaming = true;
-    document.getElementById('connect').style.display='none';
-    document.getElementById('disconnect').style.display='block';
-    setStatus("🎙 Live call started — speak freely...");
+      isStreaming = true;
+      document.getElementById('connect').style.display='none';
+      document.getElementById('disconnect').style.display='block';
+      setStatus("🎙 Live call started — बोलिए...");
+    }, 1200);
   };
 
-  ws.onmessage = (e)=>{
-    try{
+  ws.onmessage = (e) => {
+    try {
       const msg = JSON.parse(e.data);
       if(msg?.type==='output_audio_buffer.append' && msg?.audio){
         playBase64Audio(msg.audio);
-      }else if(msg?.type==='output_audio_binary' && msg?.data){
+      } else if(msg?.type==='output_audio_binary' && msg?.data){
         playBase64Audio(msg.data);
-      }else if(msg?.type==='init_ok'){
+      } else if(msg?.type==='init_ok'){
         console.log("Init OK");
       }
-    }catch(err){ console.warn("Parse error:", err); }
+    } catch(err){
+      console.warn("Parse error:", err);
+    }
   };
 
-  ws.onclose = ()=>{ setStatus("📴 Call ended."); stopCall(); };
-  ws.onerror = (err)=>{ console.error("WS error:", err); setStatus("❌ Connection error."); stopCall(); };
-}
-
-function stopCall(){
-  if(processor){ processor.disconnect(); processor=null; }
-  if(sourceNode){ sourceNode.disconnect(); sourceNode=null; }
-  if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
-  if(ws){ try{ ws.send(JSON.stringify({type:'stop'})); ws.close(); }catch{} ws=null; }
-  isStreaming=false;
-  document.getElementById('connect').style.display='block';
-  document.getElementById('disconnect').style.display='none';
-  setStatus("📴 Call stopped.");
-}
-
-document.getElementById('connect').onclick=startCall;
-document.getElementById('disconnect').onclick=stopCall;
-</script>
-
-  // Connect to your Render WebSocket server (port 8080 is proxied internally)
-  const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
-  ws = new WebSocket(wsURL);
-  setStatus("🛰 Connecting to AstroOne Realtime...");
-
-  ws.onopen = async ()=>{
-    setStatus("🔮 Connected! Initializing mic...");
-    ws.send(JSON.stringify({ type:'init', name, dob, tob, pob, gender, voice }));
-    // Start microphone capture
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioCtx = new AudioContext();
-    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
-    processor = audioCtx.createScriptProcessor(4096, 1, 1);
-    sourceNode.connect(processor);
-    processor.connect(audioCtx.destination);
-    processor.onaudioprocess = (e)=>{
-      if(ws && ws.readyState===WebSocket.OPEN){
-        const base64 = floatToBase64(e.inputBuffer.getChannelData(0));
-        ws.send(JSON.stringify({ type:'media', data:base64 }));
-      }
-    };
-    isStreaming = true;
-    document.getElementById('connect').style.display='none';
-    document.getElementById('disconnect').style.display='block';
-    setStatus("🎙 Live call started — speak freely...");
+  ws.onclose = () => {
+    setStatus("📴 Call ended.");
+    stopCall();
   };
 
-  ws.onmessage = (e)=>{
-    try{
-      const msg = JSON.parse(e.data);
-      if(msg?.type==='output_audio_buffer.append' && msg?.audio){
-        playBase64Audio(msg.audio);
-      }else if(msg?.type==='output_audio_binary' && msg?.data){
-        playBase64Audio(msg.data);
-      }else if(msg?.type==='init_ok'){
-        console.log("Init OK from server");
-      }else{
-        console.log("Server:", msg);
-      }
-    }catch(err){ console.warn("Parse error:", err); }
+  ws.onerror = (err) => {
+    console.error("WS error:", err);
+    setStatus("❌ Connection error.");
+    stopCall();
   };
-
-  ws.onclose = ()=>{ setStatus("📴 Call ended."); stopCall(); };
-  ws.onerror = (err)=>{ console.error("WS error:", err); setStatus("❌ Connection error."); stopCall(); };
 }
 
+// 🛑 Stop Call
 function stopCall(){
   if(processor){ processor.disconnect(); processor=null; }
   if(sourceNode){ sourceNode.disconnect(); sourceNode=null; }
