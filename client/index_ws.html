@@ -153,7 +153,7 @@ async function startCall(){
   if(!name||!dob||!tob||!pob||!gender){ setStatus("⚠️ सभी विवरण भरें।"); return; }
 
   // Connect to your Render WebSocket server (port 8080 is proxied internally)
-  const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8080';
+  const wsURL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
   ws = new WebSocket(wsURL);
   setStatus("🛰 Connecting to AstroOne Realtime...");
 
