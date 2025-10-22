@@ -1,31 +1,29 @@
 <!doctype html>
-<html lang="hi">
+<html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>🔮 AstroOne Live — Talk with Sumit Aggarwal</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AstroOne — Live (Simple voice)</title>
 <style>
-  :root{--accent:#6a11cb;--accent-dark:#4a0fa8}
-  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb,#2575fc);font-family:Inter,system-ui,Arial;color:#222}
-  .card{width:520px;background:#fff;border-radius:14px;padding:22px;box-shadow:0 18px 45px rgba(0,0,0,0.15)}
-  h1{margin:0 0 10px;text-align:center;font-size:20px}
+  :root{--accent:#6a11cb}
+  body{margin:0;font-family:Inter,Arial;background:linear-gradient(135deg,#6a11cb,#2575fc);height:100vh;display:flex;align-items:center;justify-content:center;color:#222}
+  .card{width:520px;background:#fff;border-radius:12px;padding:20px;box-shadow:0 20px 40px rgba(0,0,0,0.15)}
+  h1{margin:0 0 12px;font-size:20px;text-align:center}
   label{font-size:13px;color:#444;margin-top:8px;display:block}
-  input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
+  input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px}
   .row{display:flex;gap:10px}
-  #connect{background:var(--accent);color:#fff;border:none;cursor:pointer}
-  #connect:hover{background:var(--accent-dark)}
-  #disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
-  #status{margin-top:12px;color:#333;min-height:20px;text-align:center}
-  .muted{font-size:12px;color:#888;text-align:center;margin-top:8px}
-  .small{font-size:12px;color:#666;margin-top:6px}
+  #start{background:var(--accent);color:#fff;border:none;padding:12px;cursor:pointer;border-radius:8px}
+  #stop{background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:8px;display:none;cursor:pointer}
+  #status{margin-top:12px;text-align:center;color:#333;min-height:20px}
+  .muted{font-size:12px;color:#777;text-align:center;margin-top:8px}
 </style>
 </head>
 <body>
   <div class="card">
-    <h1>🔮 AstroOne Live — Talk with Sumit Aggarwal</h1>
+    <h1>🔮 AstroOne Live — Simple Voice</h1>
 
-    <label>पूरा नाम</label>
-    <input id="name" placeholder="पूरा नाम">
+    <label>पूरा नाम (optional)</label>
+    <input id="name" placeholder="Full name">
 
     <div class="row">
       <div style="flex:1">
@@ -38,253 +36,134 @@
       </div>
     </div>
 
-    <label>Place of Birth (POB)</label>
-    <input id="pob" placeholder="शहर, राज्य या देश">
-
-    <div class="row">
-      <div style="flex:1">
-        <label>Gender</label>
-        <select id="gender"><option value="">Select</option><option value="male">Male</option><option value="female">Female</option></select>
-      </div>
-      <div style="flex:1">
-        <label>Voice</label>
-        <select id="voice">
-          <option value="verse">Verse</option>
-          <option value="alloy">Alloy</option>
-          <option value="ash">Ash</option>
-          <option value="ballad">Ballad</option>
-          <option value="coral">Coral</option>
-          <option value="echo">Echo</option>
-          <option value="sage">Sage</option>
-          <option value="shimmer">Shimmer</option>
-          <option value="marin">Marin</option>
-          <option value="cedar">Cedar</option>
-        </select>
-      </div>
-    </div>
+    <label>POB (optional)</label>
+    <input id="pob" placeholder="City or place">
 
     <div style="margin-top:12px;display:flex;gap:10px">
-      <button id="connect">▶️ Start Live Call</button>
-      <button id="disconnect">⏹ Stop</button>
+      <button id="start">▶️ Start Call</button>
+      <button id="stop">⏹ Stop</button>
     </div>
 
-    <div id="status">Fill details and press Start.</div>
-    <div class="muted">Note: Allow microphone permissions in your browser.</div>
-    <div class="small">Tip: If audio is still faint, test headphones and browser tab audio output volume.</div>
+    <div id="status">Click Start to begin a realtime voice call (OpenAI Realtime).</div>
+    <div class="muted">Note: Realtime requires a valid OpenAI Realtime-enabled API key on the server.</div>
   </div>
 
 <script>
 /*
-  client/index_ws.html - Main script part 1/2
-  We'll build the AudioWorklet module as a JS string and load via blob,
-  then create AudioWorkletNode to stream mic Float32 chunks to main thread.
+  client/index.html - WebRTC client that:
+  1. Gets microphone permission
+  2. Creates RTCPeerConnection and local stream
+  3. Creates offer SDP and POSTs /offer on our server
+  4. Receives answer SDP and sets remote description
+  5. Plays remote audio tracks (AI voice) in real-time
 */
 
-// DOM refs
-const connectBtn = document.getElementById("connect");
-const disconnectBtn = document.getElementById("disconnect");
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
 const statusEl = document.getElementById("status");
 
-// state
-let ws = null;
-let audioCtx = null;
-let micStream = null;
-let workletNode = null;
-let commitTimer = null;
+let pc = null;
+let localStream = null;
+let audioEl = null;
 
-// helper: set status
-function setStatus(text) { statusEl.innerText = text; console.log(text); }
+function setStatus(t){ statusEl.innerText = t; console.log(t); }
 
-// Convert Float32Array -> 16-bit PCM LE -> base64
-function floatToBase64(float32Array) {
-  const len = float32Array.length;
-  const buffer = new ArrayBuffer(len * 2);
-  const view = new DataView(buffer);
-  for (let i = 0; i < len; i++) {
-    let s = Math.max(-1, Math.min(1, float32Array[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-  }
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
-
-// Decode Ogg/Opus base64 audio from OpenAI Realtime and play cleanly
-async function playPCMBase64(b64) {
-  try {
-    // Convert base64 → binary
-    const binary = atob(b64);
-    const len = binary.length;
-    const buffer = new ArrayBuffer(len);
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-
-    if (!audioCtx)
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    // This handles Ogg/Opus, MP3, WAV — any encoded audio format
-    const decoded = await audioCtx.decodeAudioData(buffer);
-    const src = audioCtx.createBufferSource();
-    src.buffer = decoded;
-    src.connect(audioCtx.destination);
-    src.start(0);
-  } catch (err) {
-    console.warn("Audio decode/play error:", err);
-  }
-}
-// Build AudioWorklet processor code as a string.
-// It will post Float32Array chunks to main thread via port.postMessage.
-const workletCode = `class MicProcessor extends AudioWorkletProcessor {
-  process (inputs) {
-    try {
-      const input = inputs[0];
-      if (input && input[0]) {
-        // copy to transferable Float32Array for main thread
-        const channel = input[0];
-        const buf = new Float32Array(channel.length);
-        for (let i = 0; i < channel.length; i++) buf[i] = channel[i];
-        // post message (structured clone works)
-        this.port.postMessage(buf, [buf.buffer]);
-      }
-    } catch (e) {
-      // swallow errors
-    }
-    return true;
-  }
-}
-registerProcessor('mic-processor', MicProcessor);`;
-
-// utility to load worklet from string
-async function addWorkletFromString(ctx, codeStr) {
-  const blob = new Blob([codeStr], { type: "application/javascript" });
-  const blobUrl = URL.createObjectURL(blob);
-  try {
-    await ctx.audioWorklet.addModule(blobUrl);
-  } finally {
-    URL.revokeObjectURL(blobUrl);
-  }
-}
-
-/* ---------- Start call: open WS, create AudioWorklet, stream mic ---------- */
 async function startCall() {
-  const name = document.getElementById("name").value.trim();
-  const dob = document.getElementById("dob").value;
-  const tob = document.getElementById("tob").value;
-  const pob = document.getElementById("pob").value.trim();
-  const gender = document.getElementById("gender").value;
-  const voice = document.getElementById("voice").value || "verse";
-
-  if (!name || !dob || !tob || !pob || !gender) {
-    setStatus("⚠️ कृपया सभी विवरण भरें।");
+  try {
+    setStatus("Requesting microphone permission...");
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    console.error("Microphone error:", e);
+    setStatus("Microphone access denied.");
     return;
   }
 
-  // open websocket to our server
-  const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
-  ws = new WebSocket(wsUrl);
-  setStatus("🛰 Connecting...");
+  // Build RTCPeerConnection
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
 
-  ws.onopen = async () => {
-    setStatus("🔮 Connected. Sending init...");
-    ws.send(JSON.stringify({ type: "init", name, dob, tob, pob, gender, voice }));
+  // Create audio element to play remote audio
+  audioEl = document.createElement("audio");
+  audioEl.autoplay = true;
+  audioEl.controls = false;
+  audioEl.style.display = "none";
+  document.body.appendChild(audioEl);
 
-    // slight delay to let server connect to OpenAI WS
-    await new Promise(r => setTimeout(r, 700));
-
+  pc.ontrack = (evt) => {
+    // attach remote stream to audio element
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e) {
-      setStatus("🔇 Microphone permission denied.");
-      console.error(e);
-      return;
-    }
-
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-
-    // Add worklet module from our string
-    try {
-      await addWorkletFromString(audioCtx, workletCode);
-    } catch (e) {
-      console.error("Failed to add worklet:", e);
-      setStatus("⚠️ AudioWorklet not available in this browser.");
-      return;
-    }
-
-    const micSource = audioCtx.createMediaStreamSource(micStream);
-    workletNode = new AudioWorkletNode(audioCtx, "mic-processor", { numberOfInputs: 1, numberOfOutputs: 0 });
-    // receive Float32Array chunks from worklet
-    workletNode.port.onmessage = (ev) => {
-      try {
-        const float32 = ev.data; // Float32Array (transferred)
-        if (!float32 || !float32.length) return;
-        // convert to base64 PCM16LE and send
-        const b64 = floatToBase64(float32);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "media", data: b64 }));
-        }
-      } catch (err) {
-        console.warn("worklet->main error", err);
-      }
-    };
-
-    micSource.connect(workletNode);
-
-    // commits: initial and periodic
-    setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" })); }, 1000);
-    commitTimer = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "media_commit" }));
-      }
-    }, 2500);
-
-    connectBtn.style.display = "none";
-    disconnectBtn.style.display = "inline-block";
-    setStatus("🎙 Live — बोलिए...");
-  };
-
-  ws.onmessage = (evt) => {
-    try {
-      const msg = JSON.parse(evt.data);
-      if (msg?.type === "output_audio_binary" && msg?.data) {
-        const sr = msg.sampleRate || 24000;
-        playPCMBase64(msg.data, sr);
-      } else {
-        // other informational messages (init_ok, text chunks, etc.)
-        console.debug("server:", msg);
-      }
-    } catch (e) {
-      console.warn("ws message parse error", e);
+      audioEl.srcObject = evt.streams[0];
+      setStatus("Connected — live voice streaming.");
+    } catch (err) {
+      console.warn("ontrack attach err", err);
     }
   };
 
-  ws.onerror = (err) => {
-    console.error("WebSocket error:", err);
-    setStatus("❌ Connection error.");
-    stopCall();
+  pc.oniceconnectionstatechange = () => {
+    console.log("ICE state:", pc.iceConnectionState);
+    if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+      setStatus("ICE connection closed.");
+    }
   };
 
-  ws.onclose = () => {
-    setStatus("📴 Call ended.");
-    stopCall();
-  };
+  // Add local tracks
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+  setStatus("Creating local offer...");
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // Send offer.sdp to server to exchange with OpenAI Realtime
+  setStatus("Sending offer to server...");
+  const resp = await fetch("/offer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sdp: offer.sdp, voice: "verse" })
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(()=>"<no body>");
+    setStatus("Server returned error; see console.");
+    console.error("Offer error:", resp.status, txt);
+    return;
+  }
+
+  const j = await resp.json().catch(()=>null);
+  if (!j || !j.answer) {
+    setStatus("No answer SDP from server.");
+    console.error("No answer:", j);
+    return;
+  }
+
+  // Set remote description from OpenAI
+  const answer = { type: "answer", sdp: j.answer };
+  await pc.setRemoteDescription(answer);
+  setStatus("Call connected — speak now.");
+  startBtn.style.display = "none";
+  stopBtn.style.display = "inline-block";
 }
 
 function stopCall() {
-  try { if (commitTimer) { clearInterval(commitTimer); commitTimer = null; } } catch {}
-  try { if (workletNode) { workletNode.port.onmessage = null; workletNode.disconnect(); workletNode = null; } } catch {}
-  try { if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; } } catch {}
-  try { if (ws) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "stop" })); ws.close(); } ws = null; } catch {}
-  connectBtn.style.display = "inline-block";
-  disconnectBtn.style.display = "none";
+  try {
+    if (localStream) {
+      localStream.getTracks().forEach(t=>t.stop());
+      localStream = null;
+    }
+    if (pc) {
+      pc.getSenders().forEach(s => { try { s.track && s.track.stop(); } catch {} });
+      pc.close();
+      pc = null;
+    }
+    if (audioEl) { audioEl.pause(); audioEl.srcObject = null; audioEl.remove(); audioEl = null; }
+  } catch (e) { console.warn("stop error", e); }
+  setStatus("Call ended.");
+  startBtn.style.display = "inline-block";
+  stopBtn.style.display = "none";
 }
 
-// attach handlers
-connectBtn.addEventListener("click", startCall);
-disconnectBtn.addEventListener("click", stopCall);
+startBtn.addEventListener("click", startCall);
+stopBtn.addEventListener("click", stopCall);
 </script>
 </body>
 </html>
