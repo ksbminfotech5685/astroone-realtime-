@@ -113,68 +113,29 @@ function floatToBase64(float32Array) {
   return btoa(binary);
 }
 
-// Auto-detect PCM format (16-bit or 32-bit Float) and play smoothly
-async function playPCMBase64(b64, sourceSampleRate = 24000) {
+// Decode Ogg/Opus base64 audio from OpenAI Realtime and play cleanly
+async function playPCMBase64(b64) {
   try {
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const view = new DataView(bytes.buffer);
-
-    // detect by frame length — if divisible by 4 => float32 PCM
-    let frameCount, float32;
-    if (bytes.length % 4 === 0) {
-      frameCount = bytes.length / 4;
-      float32 = new Float32Array(frameCount);
-      for (let i = 0; i < frameCount; i++) {
-        float32[i] = view.getFloat32(i * 4, true);
-      }
-    } else {
-      // fallback: 16-bit PCM
-      frameCount = bytes.length / 2;
-      float32 = new Float32Array(frameCount);
-      for (let i = 0; i < frameCount; i++) {
-        const val = view.getInt16(i * 2, true);
-        float32[i] = val / 32768;
-      }
-    }
+    // Convert base64 → binary
+    const binary = atob(b64);
+    const len = binary.length;
+    const buffer = new ArrayBuffer(len);
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
 
     if (!audioCtx)
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const outputRate = audioCtx.sampleRate || 48000;
 
-    // same rate, play directly
-    if (Math.abs(outputRate - sourceSampleRate) < 3) {
-      const buf = audioCtx.createBuffer(1, frameCount, sourceSampleRate);
-      buf.getChannelData(0).set(float32);
-      const src = audioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(audioCtx.destination);
-      src.start();
-      return;
-    }
-
-    // resample if needed
-    const offline = new OfflineAudioContext(
-      1,
-      Math.ceil(frameCount * outputRate / sourceSampleRate),
-      outputRate
-    );
-    const buf = offline.createBuffer(1, frameCount, sourceSampleRate);
-    buf.getChannelData(0).set(float32);
-    const srcNode = offline.createBufferSource();
-    srcNode.buffer = buf;
-    srcNode.connect(offline.destination);
-    srcNode.start();
-    const rendered = await offline.startRendering();
-    const playSrc = audioCtx.createBufferSource();
-    playSrc.buffer = rendered;
-    playSrc.connect(audioCtx.destination);
-    playSrc.start();
-  } catch (e) {
-    console.warn("Audio play error:", e);
+    // This handles Ogg/Opus, MP3, WAV — any encoded audio format
+    const decoded = await audioCtx.decodeAudioData(buffer);
+    const src = audioCtx.createBufferSource();
+    src.buffer = decoded;
+    src.connect(audioCtx.destination);
+    src.start(0);
+  } catch (err) {
+    console.warn("Audio decode/play error:", err);
   }
 }
-
- 
 // Build AudioWorklet processor code as a string.
 // It will post Float32Array chunks to main thread via port.postMessage.
 const workletCode = `class MicProcessor extends AudioWorkletProcessor {
