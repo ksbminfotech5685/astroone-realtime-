@@ -113,47 +113,64 @@ function floatToBase64(float32Array) {
   return btoa(binary);
 }
 
-// Play base64 Float32 PCM (OpenAI realtime voice)
+// Auto-detect PCM format (16-bit or 32-bit Float) and play smoothly
 async function playPCMBase64(b64, sourceSampleRate = 24000) {
   try {
-    // Decode base64 → Float32 samples
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const frameCount = bytes.length / 4; // 4 bytes per Float32
-    const float32 = new Float32Array(frameCount);
     const view = new DataView(bytes.buffer);
-    for (let i = 0; i < frameCount; i++) {
-      float32[i] = view.getFloat32(i * 4, true); // little-endian
+
+    // detect by frame length — if divisible by 4 => float32 PCM
+    let frameCount, float32;
+    if (bytes.length % 4 === 0) {
+      frameCount = bytes.length / 4;
+      float32 = new Float32Array(frameCount);
+      for (let i = 0; i < frameCount; i++) {
+        float32[i] = view.getFloat32(i * 4, true);
+      }
+    } else {
+      // fallback: 16-bit PCM
+      frameCount = bytes.length / 2;
+      float32 = new Float32Array(frameCount);
+      for (let i = 0; i < frameCount; i++) {
+        const val = view.getInt16(i * 2, true);
+        float32[i] = val / 32768;
+      }
     }
 
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioCtx)
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const outputRate = audioCtx.sampleRate || 48000;
 
-    // If sample rates match, play directly
-    if (Math.abs(outputRate - sourceSampleRate) < 5) {
-      const buffer = audioCtx.createBuffer(1, frameCount, sourceSampleRate);
-      buffer.getChannelData(0).set(float32);
+    // same rate, play directly
+    if (Math.abs(outputRate - sourceSampleRate) < 3) {
+      const buf = audioCtx.createBuffer(1, frameCount, sourceSampleRate);
+      buf.getChannelData(0).set(float32);
       const src = audioCtx.createBufferSource();
-      src.buffer = buffer;
+      src.buffer = buf;
       src.connect(audioCtx.destination);
       src.start();
       return;
     }
 
-    // Otherwise resample
-    const offline = new OfflineAudioContext(1, Math.ceil(frameCount * outputRate / sourceSampleRate), outputRate);
+    // resample if needed
+    const offline = new OfflineAudioContext(
+      1,
+      Math.ceil(frameCount * outputRate / sourceSampleRate),
+      outputRate
+    );
     const buf = offline.createBuffer(1, frameCount, sourceSampleRate);
     buf.getChannelData(0).set(float32);
     const srcNode = offline.createBufferSource();
     srcNode.buffer = buf;
     srcNode.connect(offline.destination);
-    srcNode.start(0);
+    srcNode.start();
     const rendered = await offline.startRendering();
     const playSrc = audioCtx.createBufferSource();
     playSrc.buffer = rendered;
     playSrc.connect(audioCtx.destination);
     playSrc.start();
   } catch (e) {
-    console.warn("Float32 play error:", e);
+    console.warn("Audio play error:", e);
   }
 }
 
