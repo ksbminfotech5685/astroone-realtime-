@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>🔮 AstroOne Live — Sumit Aggarwal</title>
+<title>🔮 AstroOne Live — Talk with Sumit Aggarwal</title>
 <style>
   :root{--accent:#6a11cb;--accent-dark:#4a0fa8}
   body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6a11cb,#2575fc);font-family:Inter,system-ui,Arial;color:#222}
-  .card{width:480px;background:#fff;border-radius:14px;padding:22px;box-shadow:0 14px 40px rgba(0,0,0,0.15)}
+  .card{width:520px;background:#fff;border-radius:14px;padding:22px;box-shadow:0 18px 45px rgba(0,0,0,0.15)}
   h1{margin:0 0 10px;text-align:center;font-size:20px}
   label{font-size:13px;color:#444;margin-top:8px;display:block}
   input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px;box-sizing:border-box}
@@ -17,6 +17,7 @@
   #disconnect{background:#e74c3c;color:#fff;border:none;cursor:pointer;display:none}
   #status{margin-top:12px;color:#333;min-height:20px;text-align:center}
   .muted{font-size:12px;color:#888;text-align:center;margin-top:8px}
+  .small{font-size:12px;color:#666;margin-top:6px}
 </style>
 </head>
 <body>
@@ -69,124 +70,244 @@
 
     <div id="status">Fill details and press Start.</div>
     <div class="muted">Note: Allow microphone permissions in your browser.</div>
+    <div class="small">Tip: If audio is still faint, test headphones and browser tab audio output volume.</div>
   </div>
 
 <script>
-// --- CONFIG ---
-const SOURCE_RATE = 24000; // OpenAI Realtime PCM rate
+/*
+  client/index_ws.html - Main script part 1/2
+  We'll build the AudioWorklet module as a JS string and load via blob,
+  then create AudioWorkletNode to stream mic Float32 chunks to main thread.
+*/
+
+// DOM refs
 const connectBtn = document.getElementById("connect");
 const disconnectBtn = document.getElementById("disconnect");
 const statusEl = document.getElementById("status");
 
-let ws=null,audioCtx=null,workletNode=null,micStream=null,commitTimer=null;
+// state
+let ws = null;
+let audioCtx = null;
+let micStream = null;
+let workletNode = null;
+let commitTimer = null;
 
-// --- STATUS ---
-function setStatus(t){statusEl.innerText=t;console.log(t);}
+// helper: set status
+function setStatus(text) { statusEl.innerText = text; console.log(text); }
 
-// --- FLOAT -> BASE64 PCM16 ---
-function floatToBase64(float32){
-  const len=float32.length,b=new ArrayBuffer(len*2),v=new DataView(b);
-  for(let i=0;i<len;i++){
-    let s=Math.max(-1,Math.min(1,float32[i]));
-    v.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true);
+// Convert Float32Array -> 16-bit PCM LE -> base64
+function floatToBase64(float32Array) {
+  const len = float32Array.length;
+  const buffer = new ArrayBuffer(len * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < len; i++) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
   }
-  let bin="",bytes=new Uint8Array(b),chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk)
-    bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));
-  return btoa(bin);
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
-// --- PLAY PCM BASE64 (resample 24k -> device) ---
-async function playPCMBase64(b64){
-  try{
-    const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-    const len=bytes.length/2;
-    const f32=new Float32Array(len);
-    for(let i=0;i<len;i++){
-      const lo=bytes[i*2],hi=bytes[i*2+1];
-      const val=(hi<<8)|lo;
-      f32[i]=(val>32767?val-65536:val)/32768;
+// Play base64 raw PCM with given source sampleRate. Resample if needed.
+async function playPCMBase64(b64, sourceSampleRate = 24000) {
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const frameCount = bytes.length / 2;
+    const float32 = new Float32Array(frameCount);
+    for (let i = 0; i < frameCount; i++) {
+      const lo = bytes[i * 2];
+      const hi = bytes[i * 2 + 1];
+      const val = (hi << 8) | lo;
+      const signed = val > 32767 ? val - 65536 : val;
+      float32[i] = signed / 32768;
     }
-    if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    const outRate=audioCtx.sampleRate;
-    if(Math.abs(outRate-SOURCE_RATE)<10){
-      const buf=audioCtx.createBuffer(1,len,SOURCE_RATE);
-      buf.getChannelData(0).set(f32);
-      const s=audioCtx.createBufferSource();s.buffer=buf;
-      s.connect(audioCtx.destination);s.start();return;
+
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    const outputRate = audioCtx.sampleRate || 48000;
+
+    if (Math.abs(outputRate - sourceSampleRate) < 2) {
+      const buffer = audioCtx.createBuffer(1, frameCount, sourceSampleRate);
+      buffer.getChannelData(0).set(float32);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(audioCtx.destination);
+      src.start();
+      return;
     }
-    const off=new OfflineAudioContext(1,Math.ceil(len*outRate/SOURCE_RATE),outRate);
-    const buf=off.createBuffer(1,len,SOURCE_RATE);
-    buf.getChannelData(0).set(f32);
-    const src=off.createBufferSource();src.buffer=buf;src.connect(off.destination);src.start();
-    const rendered=await off.startRendering();
-    const p=audioCtx.createBufferSource();p.buffer=rendered;p.connect(audioCtx.destination);p.start();
-  }catch(e){console.warn("play err",e);}
+
+    // Resample with OfflineAudioContext
+    const offline = new OfflineAudioContext(1, Math.ceil(frameCount * outputRate / sourceSampleRate), outputRate);
+    const buf = offline.createBuffer(1, frameCount, sourceSampleRate);
+    buf.getChannelData(0).set(float32);
+    const srcNode = offline.createBufferSource();
+    srcNode.buffer = buf;
+    srcNode.connect(offline.destination);
+    srcNode.start(0);
+    const rendered = await offline.startRendering();
+    const playSrc = audioCtx.createBufferSource();
+    playSrc.buffer = rendered;
+    playSrc.connect(audioCtx.destination);
+    playSrc.start();
+  } catch (e) {
+    console.warn("playPCMBase64 error", e);
+  }
 }
 
-// --- AUDIO WORKLET PROCESSOR (modern mic capture) ---
-class MicProcessor extends AudioWorkletProcessor{
-  process(inputs){
-    if(inputs&&inputs[0]&&inputs[0][0]){
-      const ch=inputs[0][0];
-      const msg=floatToBase64(ch);
-      this.port.postMessage(msg);
+// Build AudioWorklet processor code as a string.
+// It will post Float32Array chunks to main thread via port.postMessage.
+const workletCode = `class MicProcessor extends AudioWorkletProcessor {
+  process (inputs) {
+    try {
+      const input = inputs[0];
+      if (input && input[0]) {
+        // copy to transferable Float32Array for main thread
+        const channel = input[0];
+        const buf = new Float32Array(channel.length);
+        for (let i = 0; i < channel.length; i++) buf[i] = channel[i];
+        // post message (structured clone works)
+        this.port.postMessage(buf, [buf.buffer]);
+      }
+    } catch (e) {
+      // swallow errors
     }
     return true;
   }
 }
-registerProcessor("mic-processor",MicProcessor);
-</script>
+registerProcessor('mic-processor', MicProcessor);`;
 
-<script type="module">
-let audioCtx,micNode;
-async function startCall(){
-  const name=nameEl.value.trim(),dob=dobEl.value,tob=tobEl.value,pob=pobEl.value.trim(),
-        gender=genderEl.value,voice=voiceEl.value||"verse";
-  if(!name||!dob||!tob||!pob||!gender){setStatus("⚠️ सभी विवरण भरें।");return;}
-  const wsUrl=(location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws";
-  ws=new WebSocket(wsUrl);setStatus("🛰 Connecting...");
-  ws.onopen=async()=>{
-    ws.send(JSON.stringify({type:"init",name,dob,tob,pob,gender,voice}));
-    await new Promise(r=>setTimeout(r,800));
-    micStream=await navigator.mediaDevices.getUserMedia({audio:true});
-    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([document.querySelector('script').textContent],{type:'application/javascript'})));
-    micNode=new AudioWorkletNode(audioCtx,"mic-processor");
-    const micSrc=audioCtx.createMediaStreamSource(micStream);
-    micSrc.connect(micNode);
-    micNode.port.onmessage=e=>{
-      if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"media",data:e.data}));
+// utility to load worklet from string
+async function addWorkletFromString(ctx, codeStr) {
+  const blob = new Blob([codeStr], { type: "application/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    await ctx.audioWorklet.addModule(blobUrl);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+/* ---------- Start call: open WS, create AudioWorklet, stream mic ---------- */
+async function startCall() {
+  const name = document.getElementById("name").value.trim();
+  const dob = document.getElementById("dob").value;
+  const tob = document.getElementById("tob").value;
+  const pob = document.getElementById("pob").value.trim();
+  const gender = document.getElementById("gender").value;
+  const voice = document.getElementById("voice").value || "verse";
+
+  if (!name || !dob || !tob || !pob || !gender) {
+    setStatus("⚠️ कृपया सभी विवरण भरें।");
+    return;
+  }
+
+  // open websocket to our server
+  const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws";
+  ws = new WebSocket(wsUrl);
+  setStatus("🛰 Connecting...");
+
+  ws.onopen = async () => {
+    setStatus("🔮 Connected. Sending init...");
+    ws.send(JSON.stringify({ type: "init", name, dob, tob, pob, gender, voice }));
+
+    // slight delay to let server connect to OpenAI WS
+    await new Promise(r => setTimeout(r, 700));
+
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setStatus("🔇 Microphone permission denied.");
+      console.error(e);
+      return;
+    }
+
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+
+    // Add worklet module from our string
+    try {
+      await addWorkletFromString(audioCtx, workletCode);
+    } catch (e) {
+      console.error("Failed to add worklet:", e);
+      setStatus("⚠️ AudioWorklet not available in this browser.");
+      return;
+    }
+
+    const micSource = audioCtx.createMediaStreamSource(micStream);
+    workletNode = new AudioWorkletNode(audioCtx, "mic-processor", { numberOfInputs: 1, numberOfOutputs: 0 });
+    // receive Float32Array chunks from worklet
+    workletNode.port.onmessage = (ev) => {
+      try {
+        const float32 = ev.data; // Float32Array (transferred)
+        if (!float32 || !float32.length) return;
+        // convert to base64 PCM16LE and send
+        const b64 = floatToBase64(float32);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "media", data: b64 }));
+        }
+      } catch (err) {
+        console.warn("worklet->main error", err);
+      }
     };
-    setTimeout(()=>ws.send(JSON.stringify({type:"media_commit"})),1000);
-    commitTimer=setInterval(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:"media_commit"}));},2500);
-    connectBtn.style.display="none";disconnectBtn.style.display="inline-block";
+
+    micSource.connect(workletNode);
+
+    // commits: initial and periodic
+    setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "media_commit" })); }, 1000);
+    commitTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "media_commit" }));
+      }
+    }, 2500);
+
+    connectBtn.style.display = "none";
+    disconnectBtn.style.display = "inline-block";
     setStatus("🎙 Live — बोलिए...");
   };
-  ws.onmessage=e=>{
-    try{const m=JSON.parse(e.data);
-      if(m?.type==="output_audio_binary"&&m?.data)playPCMBase64(m.data);
-    }catch(err){console.log("parse",err);}
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg?.type === "output_audio_binary" && msg?.data) {
+        const sr = msg.sampleRate || 24000;
+        playPCMBase64(msg.data, sr);
+      } else {
+        // other informational messages (init_ok, text chunks, etc.)
+        console.debug("server:", msg);
+      }
+    } catch (e) {
+      console.warn("ws message parse error", e);
+    }
   };
-  ws.onerror=err=>{console.log("WS err",err);stopCall();};
-  ws.onclose=()=>{setStatus("📴 Call ended.");stopCall();};
+
+  ws.onerror = (err) => {
+    console.error("WebSocket error:", err);
+    setStatus("❌ Connection error.");
+    stopCall();
+  };
+
+  ws.onclose = () => {
+    setStatus("📴 Call ended.");
+    stopCall();
+  };
 }
 
-function stopCall(){
-  if(commitTimer)clearInterval(commitTimer);
-  if(micStream)micStream.getTracks().forEach(t=>t.stop());
-  if(ws){try{ws.send(JSON.stringify({type:"stop"}));ws.close();}catch{}}
-  connectBtn.style.display="inline-block";disconnectBtn.style.display="none";
+function stopCall() {
+  try { if (commitTimer) { clearInterval(commitTimer); commitTimer = null; } } catch {}
+  try { if (workletNode) { workletNode.port.onmessage = null; workletNode.disconnect(); workletNode = null; } } catch {}
+  try { if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; } } catch {}
+  try { if (ws) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "stop" })); ws.close(); } ws = null; } catch {}
+  connectBtn.style.display = "inline-block";
+  disconnectBtn.style.display = "none";
 }
 
-const nameEl=document.getElementById("name"),
-dobEl=document.getElementById("dob"),
-tobEl=document.getElementById("tob"),
-pobEl=document.getElementById("pob"),
-genderEl=document.getElementById("gender"),
-voiceEl=document.getElementById("voice");
-document.getElementById("connect").onclick=startCall;
-document.getElementById("disconnect").onclick=stopCall;
+// attach handlers
+connectBtn.addEventListener("click", startCall);
+disconnectBtn.addEventListener("click", stopCall);
 </script>
 </body>
 </html>
