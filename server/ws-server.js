@@ -1,264 +1,114 @@
-// server/ws-server.js
-// Final stable AstroOne realtime server (ESM)
-// - Serves client/index_ws.html
-// - WS endpoint /ws for browser
-// - Connects to OpenAI realtime (binary frames forwarded as base64 with sampleRate)
-// - Kundli + optional Google geocode + Shivam integration
-// - Auto-cleanup for old .mp3/.wav/.tmp files
-// - Keepalive + reconnect logic
+// server/server.js
+// Simple WebRTC bridge to OpenAI Realtime (voice-only, simple version)
+// Requirements:
+// - Node 18+
+// - Set OPENAI_API_KEY in environment
+// - Place client/index.html (client folder) next to server folder
+//
+// Start: node server.js (or add scripts in package.json)
 
 import express from "express";
-import http from "http";
-import { WebSocketServer, WebSocket } from "ws";
 import fetch from "node-fetch";
-import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-import fs from "fs";
-import bodyParser from "body-parser";
+import dotenv from "dotenv";
 
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 10000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const MODEL_NAME = process.env.MODEL_NAME || "gpt-4o-realtime-preview-2024-10-01";
-const DEFAULT_VOICE = process.env.DEFAULT_VOICE || "verse";
-const GEOCODE_KEY = process.env.GEOCODE_KEY || "";
-const SHIVAM_BASE = process.env.SHIVAM_BASE || "";
-const SHIVAM_API_KEY = process.env.SHIVAM_API_KEY || "";
-
-const VALID_VOICES = ["alloy","ash","ballad","coral","echo","sage","shimmer","verse","marin","cedar"];
-
 if (!OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY required in environment");
   process.exit(1);
 }
 
+// Which realtime model to use (voice-capable)
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-4o-realtime-preview-2024-10-01";
+// Default voice parameter
+const DEFAULT_VOICE = process.env.DEFAULT_VOICE || "verse";
+
 const app = express();
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "../client")));
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "../client/index_ws.html")));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "../client"))); // serve client files
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+// Health
+app.get("/health", (req, res) => res.json({ ok: true }));
 
-// helper: geocode place -> lat/lon (optional)
-async function geocodePlace(place) {
-  if (!GEOCODE_KEY || !place) return { lat: null, lon: null };
+/**
+ * POST /offer
+ * Body: { sdp: "<client offer sdp>", voice: "verse" }
+ * Returns: { answer: "<answer sdp from OpenAI>" }
+ *
+ * Flow:
+ * 1. Receive browser SDP offer
+ * 2. POST to OpenAI Realtime Sessions endpoint with the offer
+ * 3. Return the answer SDP to browser
+ */
+app.post("/offer", async (req, res) => {
   try {
-    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(place)}&key=${GEOCODE_KEY}`);
-    const j = await res.json();
-    if (j.status === "OK" && j.results?.length) {
-      const { lat, lng } = j.results[0].geometry.location;
-      return { lat: String(lat), lon: String(lng) };
-    }
-  } catch (e) {
-    console.warn("Geocode error:", e?.message || e);
-  }
-  return { lat: null, lon: null };
-}
+    const { sdp, voice } = req.body || {};
+    if (!sdp) return res.status(400).json({ error: "Missing sdp in request body" });
 
-// helper: call Shivam kundli API (optional)
-async function fetchShivamKundli(name, dob, tob, pob, gender) {
-  if (!SHIVAM_BASE || !SHIVAM_API_KEY) return null;
-  try {
-    const tokenResp = await fetch(`${SHIVAM_BASE}/users/generateToken`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apikey: SHIVAM_API_KEY })
+    // Build request to OpenAI realtime. This endpoint/contract is the pattern used by
+    // OpenAI realtime: exchange SDP with the API to create a direct WebRTC session.
+    //
+    // NOTE: OpenAI's exact path and request fields can change. If you get a 4xx from OpenAI,
+    // check that your API key has realtime enabled and the model name is correct.
+    const openaiUrl = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(OPENAI_REALTIME_MODEL)}&voice=${encodeURIComponent(voice || DEFAULT_VOICE)}`;
+
+    // The Realtime endpoint expects a POST with the offer body (application/sdp) and returns
+    // an SDP answer (string) in the response. Some deployments return JSON like { sdp: "..." }.
+    // We'll send content-type application/sdp and accept text or JSON.
+    const resp = await fetch(openaiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/sdp",
+        Accept: "application/sdp, application/json, text/plain",
+      },
+      body: sdp,
+      // timeout not set; let platform handle process lifetime
     });
-    const tjson = await tokenResp.json().catch(()=>null);
-    const token = tjson?.data?.[0]?.token;
-    if (!token) return null;
-    const [year,month,day] = (dob || "").split("-");
-    const [hour,min] = (tob || "").split(":");
-    const payload = { name, day, month, year, hour, min, place: pob, latitude: "", longitude: "", timezone: "5.5", gender: (gender||"male").toLowerCase() };
-    const astroRes = await fetch(`${SHIVAM_BASE}/astro/getAstroData`, {
-      method:"POST", headers: { Authorization:`Bearer ${token}`, "Content-Type":"application/json" }, body: JSON.stringify(payload)
-    });
-    const aj = await astroRes.json().catch(()=>null);
-    return aj?.data || null;
-  } catch (e) {
-    console.warn("Shivam error:", e?.message || e);
-    return null;
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "<no body>");
+      console.error("OpenAI Realtime /offer failed:", resp.status, text.slice ? text.slice(0, 500) : text);
+      return res.status(502).json({ error: "OpenAI realtime responded with error", status: resp.status, body: text });
+    }
+
+    // Try to interpret response
+    const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+    let answerSDP = null;
+    if (contentType.includes("application/sdp") || contentType.includes("text/plain")) {
+      answerSDP = await resp.text();
+    } else {
+      // maybe JSON { sdp: "..." }
+      const j = await resp.json().catch(() => null);
+      answerSDP = j?.sdp || j?.answer || (typeof j === "string" ? j : null);
+    }
+
+    if (!answerSDP) {
+      const body = await resp.text().catch(() => "");
+      console.error("No answer SDP received from OpenAI:", body.slice ? body.slice(0, 1000) : body);
+      return res.status(502).json({ error: "No answer SDP from OpenAI", body });
+    }
+
+    // Return to browser
+    return res.json({ answer: answerSDP });
+  } catch (err) {
+    console.error("Offer handler error:", err?.message || err);
+    return res.status(500).json({ error: "server_error", details: err?.message || String(err) });
   }
-}
-
-async function buildKundliSummary({ name, dob, tob, pob, gender }) {
-  let summary = `नाम: ${name || "N/A"}, DOB: ${dob || "N/A"} ${tob || ""}, POB: ${pob || "N/A"}`;
-  try {
-    if (pob && GEOCODE_KEY) {
-      const geo = await geocodePlace(pob);
-      summary += ` (lat:${geo.lat||"NA"}, lon:${geo.lon||"NA"})`;
-    }
-    if (SHIVAM_BASE && SHIVAM_API_KEY && name && dob && tob) {
-      const astro = await fetchShivamKundli(name, dob, tob, pob, gender);
-      if (astro) summary += ` | Sun:${astro.sun_sign||astro?.sun||""}, Moon:${astro.moon_sign||astro?.moon||""}`;
-    }
-  } catch (e){ }
-  return summary;
-}
-
-/* -------- OpenAI Realtime WS Management -------- */
-let openaiWs = null;
-let openaiReady = false;
-let openaiVoice = DEFAULT_VOICE;
-let openaiInstructions = "";
-
-// Set sample rate we expect OpenAI voice frames to be sent as.
-// Based on testing OpenAI realtime tends to stream PCM at 24000 Hz for voice models.
-const OPENAI_AUDIO_SAMPLE_RATE = 24000;
-
-function connectOpenAI(instructions = "", voice = DEFAULT_VOICE) {
-  if (!VALID_VOICES.includes(voice)) voice = DEFAULT_VOICE;
-  if (instructions) openaiInstructions = instructions;
-  openaiVoice = voice;
-
-  if (openaiWs && openaiWs.readyState === WebSocket.OPEN) {
-    if (instructions) {
-      try { openaiWs.send(JSON.stringify({ type: "input_text", text: instructions })); } catch {}
-    }
-    return;
-  }
-
-  const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(MODEL_NAME)}&voice=${encodeURIComponent(openaiVoice)}`;
-  console.log("🔌 connecting to OpenAI Realtime:", url);
-
-  openaiWs = new WebSocket(url, {
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "OpenAI-Beta": "realtime=v1" }
-  });
-  openaiWs.binaryType = "arraybuffer";
-
-  openaiWs.on("open", () => {
-    console.log("✅ Connected to OpenAI Realtime WS");
-    openaiReady = true;
-    if (openaiInstructions) {
-      try { openaiWs.send(JSON.stringify({ type: "input_text", text: openaiInstructions })); } catch {}
-    }
-  });
-
-  openaiWs.on("message", (data) => {
-    try {
-      // binary audio frames (ArrayBuffer) -> forward as base64 + sampleRate
-      if (typeof data !== "string" && Buffer.isBuffer(data)) {
-        const base64 = data.toString("base64");
-        const payload = { type: "output_audio_binary", data: base64, sampleRate: OPENAI_AUDIO_SAMPLE_RATE };
-        broadcastToClients(JSON.stringify(payload));
-        return;
-      }
-      // otherwise text message
-      const msg = JSON.parse(data.toString());
-      broadcastToClients(JSON.stringify(msg));
-    } catch (e) {
-      console.warn("OpenAI message parse err:", e?.message || e);
-    }
-  });
-
-  openaiWs.on("close", (code, reason) => {
-    console.warn("⚠️ OpenAI WS closed:", code, (reason && reason.toString && reason.toString().slice(0,200)) || "");
-    openaiReady = false;
-    setTimeout(()=>connectOpenAI(openaiInstructions, openaiVoice), 2000);
-  });
-
-  openaiWs.on("error", (err) => {
-    console.error("OpenAI WS error:", err?.message || err);
-    openaiReady = false;
-  });
-}
-
-// initial connection
-connectOpenAI("", DEFAULT_VOICE);
-
-/* -------- Browser WS Server (/ws) -------- */
-const clients = new Set();
-function broadcastToClients(msg) {
-  for (const c of clients) {
-    try { if (c.readyState === WebSocket.OPEN) c.send(msg); } catch {}
-  }
-}
-
-wss.on("connection", (ws) => {
-  console.log("🖥 Browser connected");
-  clients.add(ws);
-
-  ws.on("message", async (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      if (!msg?.type) return;
-
-      if (msg.type === "init") {
-        const { name, dob, tob, pob, gender, voice } = msg;
-        const kundli = await buildKundliSummary({ name, dob, tob, pob, gender });
-        const instr = `You are Sumit Aggarwal, an experienced Vedic astrologer. Kundli summary: ${kundli}. Respond in Hindi, speak clearly and naturally.`;
-        connectOpenAI(instr, (VALID_VOICES.includes(voice) ? voice : DEFAULT_VOICE));
-        try { ws.send(JSON.stringify({ type: "init_ok" })); } catch {}
-        return;
-      }
-
-      // incoming mic audio chunk (base64 PCM16LE) from browser
-      if (msg.type === "media" && openaiReady) {
-        try { openaiWs.send(JSON.stringify({ type: "input_audio_buffer.append", audio: msg.data })); } catch (e) {}
-        return;
-      }
-
-      // commit and ask response
-      if (msg.type === "media_commit" && openaiReady) {
-        try {
-          openaiWs.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-          openaiWs.send(JSON.stringify({ type: "response.create", response: { instructions: "" } }));
-        } catch (e) {}
-        return;
-      }
-
-      if (msg.type === "stop") { try { ws.close(); } catch {} return; }
-
-    } catch (e) {
-      console.warn("Browser WS parse err:", e?.message || e);
-    }
-  });
-
-  ws.on("close", () => {
-    clients.delete(ws);
-    console.log("🖥 Browser disconnected");
-  });
-
-  ws.on("error", (err) => {
-    console.warn("Browser WS error:", err?.message || err);
-    try { ws.close(); } catch {}
-  });
 });
 
-/* -------- Auto-clean old files (mp3/wav/tmp) -------- */
-function cleanOldFiles() {
-  const dirs = [path.join(__dirname, "../public"), path.join(__dirname)];
-  const now = Date.now();
-  dirs.forEach(d => {
-    if (!fs.existsSync(d)) return;
-    fs.readdirSync(d).forEach(f => {
-      if (/\.(mp3|wav|tmp)$/i.test(f)) {
-        const fp = path.join(d, f);
-        try {
-          const st = fs.statSync(fp);
-          if (now - st.mtimeMs > 5 * 60 * 1000) {
-            fs.unlinkSync(fp);
-            console.log("🧹 Deleted old file:", fp);
-          }
-        } catch (e) {}
-      }
-    });
-  });
-}
-setInterval(cleanOldFiles, 5 * 60 * 1000);
+// Fallback to serve index.html for root
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "../client/index.html"));
+});
 
-/* -------- Keep-alive ping (safe) -------- */
-setInterval(() => {
-  try {
-    const base = process.env.RENDER_EXTERNAL_URL || "";
-    if (base && base.startsWith("http")) fetch(base).catch(()=>{});
-  } catch {}
-}, 30000);
-
-/* -------- Start server -------- */
-server.listen(PORT, () => {
-  console.log(`🚀 AstroOne WS server running on port ${PORT}`);
+const PORT = Number(process.env.PORT || 10000);
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+  console.log(`Serving client from: ${path.join(__dirname, "../client")}`);
 });
