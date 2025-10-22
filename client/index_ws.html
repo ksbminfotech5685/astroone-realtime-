@@ -113,25 +113,23 @@ function floatToBase64(float32Array) {
   return btoa(binary);
 }
 
-// Play base64 raw PCM with given source sampleRate. Resample if needed.
+// Play base64 Float32 PCM (OpenAI realtime voice)
 async function playPCMBase64(b64, sourceSampleRate = 24000) {
   try {
+    // Decode base64 → Float32 samples
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const frameCount = bytes.length / 2;
+    const frameCount = bytes.length / 4; // 4 bytes per Float32
     const float32 = new Float32Array(frameCount);
+    const view = new DataView(bytes.buffer);
     for (let i = 0; i < frameCount; i++) {
-      const lo = bytes[i * 2];
-      const hi = bytes[i * 2 + 1];
-      const val = (hi << 8) | lo;
-      const signed = val > 32767 ? val - 65536 : val;
-      float32[i] = signed / 32768;
+      float32[i] = view.getFloat32(i * 4, true); // little-endian
     }
 
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
     const outputRate = audioCtx.sampleRate || 48000;
 
-    if (Math.abs(outputRate - sourceSampleRate) < 2) {
+    // If sample rates match, play directly
+    if (Math.abs(outputRate - sourceSampleRate) < 5) {
       const buffer = audioCtx.createBuffer(1, frameCount, sourceSampleRate);
       buffer.getChannelData(0).set(float32);
       const src = audioCtx.createBufferSource();
@@ -141,7 +139,7 @@ async function playPCMBase64(b64, sourceSampleRate = 24000) {
       return;
     }
 
-    // Resample with OfflineAudioContext
+    // Otherwise resample
     const offline = new OfflineAudioContext(1, Math.ceil(frameCount * outputRate / sourceSampleRate), outputRate);
     const buf = offline.createBuffer(1, frameCount, sourceSampleRate);
     buf.getChannelData(0).set(float32);
@@ -155,10 +153,11 @@ async function playPCMBase64(b64, sourceSampleRate = 24000) {
     playSrc.connect(audioCtx.destination);
     playSrc.start();
   } catch (e) {
-    console.warn("playPCMBase64 error", e);
+    console.warn("Float32 play error:", e);
   }
 }
 
+ 
 // Build AudioWorklet processor code as a string.
 // It will post Float32Array chunks to main thread via port.postMessage.
 const workletCode = `class MicProcessor extends AudioWorkletProcessor {
