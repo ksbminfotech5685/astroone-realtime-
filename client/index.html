@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AstroOne — Live (Simple voice)</title>
+<style>
+  :root{--accent:#6a11cb}
+  body{margin:0;font-family:Inter,Arial;background:linear-gradient(135deg,#6a11cb,#2575fc);height:100vh;display:flex;align-items:center;justify-content:center;color:#222}
+  .card{width:520px;background:#fff;border-radius:12px;padding:20px;box-shadow:0 20px 40px rgba(0,0,0,0.15)}
+  h1{margin:0 0 12px;font-size:20px;text-align:center}
+  label{font-size:13px;color:#444;margin-top:8px;display:block}
+  input,select,button{width:100%;padding:10px;margin-top:6px;border-radius:8px;border:1px solid #ddd;font-size:14px}
+  .row{display:flex;gap:10px}
+  #start{background:var(--accent);color:#fff;border:none;padding:12px;cursor:pointer;border-radius:8px}
+  #stop{background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:8px;display:none;cursor:pointer}
+  #status{margin-top:12px;text-align:center;color:#333;min-height:20px}
+  .muted{font-size:12px;color:#777;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔮 AstroOne Live — Simple Voice</h1>
+
+    <label>पूरा नाम (optional)</label>
+    <input id="name" placeholder="Full name">
+
+    <div class="row">
+      <div style="flex:1">
+        <label>DOB</label>
+        <input id="dob" type="date">
+      </div>
+      <div style="flex:1">
+        <label>Time</label>
+        <input id="tob" type="time">
+      </div>
+    </div>
+
+    <label>POB (optional)</label>
+    <input id="pob" placeholder="City or place">
+
+    <div style="margin-top:12px;display:flex;gap:10px">
+      <button id="start">▶️ Start Call</button>
+      <button id="stop">⏹ Stop</button>
+    </div>
+
+    <div id="status">Click Start to begin a realtime voice call (OpenAI Realtime).</div>
+    <div class="muted">Note: Realtime requires a valid OpenAI Realtime-enabled API key on the server.</div>
+  </div>
+
+<script>
+/*
+  client/index.html - WebRTC client that:
+  1. Gets microphone permission
+  2. Creates RTCPeerConnection and local stream
+  3. Creates offer SDP and POSTs /offer on our server
+  4. Receives answer SDP and sets remote description
+  5. Plays remote audio tracks (AI voice) in real-time
+*/
+
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+const statusEl = document.getElementById("status");
+
+let pc = null;
+let localStream = null;
+let audioEl = null;
+
+function setStatus(t){ statusEl.innerText = t; console.log(t); }
+
+async function startCall() {
+  try {
+    setStatus("Requesting microphone permission...");
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    console.error("Microphone error:", e);
+    setStatus("Microphone access denied.");
+    return;
+  }
+
+  // Build RTCPeerConnection
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
+
+  // Create audio element to play remote audio
+  audioEl = document.createElement("audio");
+  audioEl.autoplay = true;
+  audioEl.controls = false;
+  audioEl.style.display = "none";
+  document.body.appendChild(audioEl);
+
+  pc.ontrack = (evt) => {
+    // attach remote stream to audio element
+    try {
+      audioEl.srcObject = evt.streams[0];
+      setStatus("Connected — live voice streaming.");
+    } catch (err) {
+      console.warn("ontrack attach err", err);
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log("ICE state:", pc.iceConnectionState);
+    if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+      setStatus("ICE connection closed.");
+    }
+  };
+
+  // Add local tracks
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+  setStatus("Creating local offer...");
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // Send offer.sdp to server to exchange with OpenAI Realtime
+  setStatus("Sending offer to server...");
+  const resp = await fetch("/offer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sdp: offer.sdp, voice: "verse" })
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(()=>"<no body>");
+    setStatus("Server returned error; see console.");
+    console.error("Offer error:", resp.status, txt);
+    return;
+  }
+
+  const j = await resp.json().catch(()=>null);
+  if (!j || !j.answer) {
+    setStatus("No answer SDP from server.");
+    console.error("No answer:", j);
+    return;
+  }
+
+  // Set remote description from OpenAI
+  const answer = { type: "answer", sdp: j.answer };
+  await pc.setRemoteDescription(answer);
+  setStatus("Call connected — speak now.");
+  startBtn.style.display = "none";
+  stopBtn.style.display = "inline-block";
+}
+
+function stopCall() {
+  try {
+    if (localStream) {
+      localStream.getTracks().forEach(t=>t.stop());
+      localStream = null;
+    }
+    if (pc) {
+      pc.getSenders().forEach(s => { try { s.track && s.track.stop(); } catch {} });
+      pc.close();
+      pc = null;
+    }
+    if (audioEl) { audioEl.pause(); audioEl.srcObject = null; audioEl.remove(); audioEl = null; }
+  } catch (e) { console.warn("stop error", e); }
+  setStatus("Call ended.");
+  startBtn.style.display = "inline-block";
+  stopBtn.style.display = "none";
+}
+
+startBtn.addEventListener("click", startCall);
+stopBtn.addEventListener("click", stopCall);
+</script>
+</body>
+</html>
