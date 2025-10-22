@@ -104,7 +104,7 @@ app.post("/offer", async (req, res) => {
 
 // Fallback to serve index.html for root
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../client/index.html"));
+  res.sendFile(path.join(__dirname, "../client/index_ws.html"));
 });
 
 const PORT = Number(process.env.PORT || 10000);
